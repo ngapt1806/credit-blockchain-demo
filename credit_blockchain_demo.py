@@ -519,6 +519,7 @@ if menu.startswith("1."):
                 st.code(f"TX Hash: {tx['tx_hash']}\nTime: {format_time(tx['time'])}")
 
 # -----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # 2) KHÁCH HÀNG: CÓ ĐIỂM (CHỈ SỐ), KHÔNG CHI TIẾT & KHÔNG XẾP HẠNG
 # -----------------------------------------------------------------------
 elif menu.startswith("2."):
@@ -544,86 +545,84 @@ elif menu.startswith("2."):
     st.markdown("### 📈 Điểm tín dụng")
     st.metric("Điểm tín dụng", int(score))
 
-    # Request từ NH B
-   req = bc.latest_access_request(cid, CreditSharingContractSim.BANK_B)
+    # ✅ Request từ NH B (chỉ hiện UI khi có request)
+    req = bc.latest_access_request(cid, CreditSharingContractSim.BANK_B)
 
-# ✅ CHỈ HIỂN THỊ KHI CÓ YÊU CẦU
-if req:
-    st.markdown("### 📨 Yêu cầu truy cập từ Ngân hàng B")
+    if req:
+        st.markdown("### 📨 Yêu cầu truy cập từ Ngân hàng B")
 
-    if req.get("pending"):
-        st.warning(
-            f"**PENDING** | {format_time(req.get('time', 0))} | Mục đích: {req.get('purpose', '-')}"
-        )
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            if st.button("✅ CẤP QUYỀN", use_container_width=True):
-                contract.grant_consent_to_bank_b(cid)
-                bc.save()
-                st.toast("🔐 Đã cấp quyền cho Ngân hàng B", icon="✅")
-                st.rerun()
-        with c2:
-            if st.button("❌ TỪ CHỐI", use_container_width=True):
-                contract.deny_consent_to_bank_b(cid)
-                bc.save()
-                st.toast("🚫 Đã từ chối yêu cầu", icon="⛔")
-                st.rerun()
-        with c3:
-            if st.button("🧹 THU HỒI (REVOKE)", use_container_width=True):
+        if req.get("pending"):
+            st.warning(
+                f"**PENDING** | {format_time(req.get('time', 0))} | Mục đích: {req.get('purpose', '-')}"
+            )
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if st.button("✅ CẤP QUYỀN", use_container_width=True):
+                    contract.grant_consent_to_bank_b(cid)
+                    bc.save()
+                    st.toast("🔐 Đã cấp quyền cho Ngân hàng B", icon="✅")
+                    st.rerun()
+            with c2:
+                if st.button("❌ TỪ CHỐI", use_container_width=True):
+                    contract.deny_consent_to_bank_b(cid)
+                    bc.save()
+                    st.toast("🚫 Đã từ chối yêu cầu", icon="⛔")
+                    st.rerun()
+            with c3:
+                if st.button("🧹 THU HỒI (REVOKE)", use_container_width=True):
+                    contract.revoke_consent_from_bank_b(cid)
+                    bc.save()
+                    st.toast("🔒 Đã thu hồi quyền", icon="⛔")
+                    st.rerun()
+        else:
+            action = req.get("handled_action") or "-"
+            ht = req.get("handled_time")
+            st.info(
+                f"Đã xử lý yêu cầu | Kết quả: **{action}** | Lúc: {format_time(ht) if ht else '-'}"
+            )
+
+            if st.button("🧹 THU HỒI QUYỀN (REVOKE)"):
                 contract.revoke_consent_from_bank_b(cid)
                 bc.save()
                 st.toast("🔒 Đã thu hồi quyền", icon="⛔")
                 st.rerun()
-    else:
-        action = req.get("handled_action") or "-"
-        ht = req.get("handled_time")
-        st.info(
-            f"Đã xử lý yêu cầu | Kết quả: **{action}** | Lúc: {format_time(ht) if ht else '-'}"
-        )
 
-        if st.button("🧹 THU HỒI QUYỀN (REVOKE)"):
-            contract.revoke_consent_from_bank_b(cid)
-            bc.save()
-            st.toast("🔒 Đã thu hồi quyền", icon="⛔")
-            st.rerun()
-
-# -----------------------------------------------------------------------
-# 📄 Lịch sử giao dịch (để OUTSIDE if req, cho KH luôn thấy)
-# -----------------------------------------------------------------------
-st.markdown("### 📄 Lịch sử giao dịch")
-tx_rows = bc.customer_transactions(cid)
-view = []
-for _, tx in tx_rows:
-    view.append(
-        {
-            "Thời gian": format_time(tx.get("time", 0)),
-            "Sự kiện": tx.get("status_label", ""),
-            "Số tiền (VND)": int(tx.get("amount", 0)),
-            "TX Hash": tx.get("tx_hash", ""),
-        }
-    )
-st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
-
-# -----------------------------------------------------------------------
-# 🕵️ Lịch sử người xem (Access Logs)
-# -----------------------------------------------------------------------
-st.markdown("### 🕵️ Lịch sử người xem")
-logs = bc.access_logs(cid)
-
-if not logs:
-    st.info("Chưa có lượt truy cập nào.")
-else:
-    rows = []
-    for _, tx in logs:
-        rows.append(
+    # -------------------------------------------------------------------
+    # 📄 Lịch sử giao dịch (KH luôn thấy dù có/không có request)
+    # -------------------------------------------------------------------
+    st.markdown("### 📄 Lịch sử giao dịch")
+    tx_rows = bc.customer_transactions(cid)
+    view = []
+    for _, tx in tx_rows:
+        view.append(
             {
-                "Type": tx.get("type", ""),             # ACCESS_LOG
-                "Viewer": tx.get("viewer", ""),         # Ngân hàng B
-                "Time": format_time(tx.get("time", 0)), # giờ VN
+                "Thời gian": format_time(tx.get("time", 0)),
+                "Sự kiện": tx.get("status_label", ""),
+                "Số tiền (VND)": int(tx.get("amount", 0)),
+                "TX Hash": tx.get("tx_hash", ""),
             }
         )
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
 
+    # -------------------------------------------------------------------
+    # 🕵️ Lịch sử người xem (Access Logs)
+    # -------------------------------------------------------------------
+    st.markdown("### 🕵️ Lịch sử người xem")
+    logs = bc.access_logs(cid)
+
+    if not logs:
+        st.info("Chưa có lượt truy cập nào.")
+    else:
+        rows = []
+        for _, tx in logs:
+            rows.append(
+                {
+                    "Type": tx.get("type", ""),              # ACCESS_LOG
+                    "Viewer": tx.get("viewer", ""),          # Ngân hàng B
+                    "Time": format_time(tx.get("time", 0)),  # giờ VN
+                }
+            )
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # -----------------------------------------------------------------------

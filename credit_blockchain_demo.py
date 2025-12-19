@@ -2,6 +2,7 @@
 # credit_blockchain_demo.py
 # HỆ THỐNG CHIA SẺ DỮ LIỆU TÍN DỤNG (Blockchain Chain + Streamlit)
 # Ngân hàng A ghi sự kiện tín dụng | Ngân hàng B gửi yêu cầu & thẩm định | KH cấp/từ chối/thu hồi
+# + SỔ CÁI CÔNG KHAI (Public Ledger)
 # =======================================================================
 
 import time
@@ -54,6 +55,52 @@ def credit_decision(score: int):
         return "🟡 Trung bình", "CÂN NHẮC – BỔ SUNG HỒ SƠ", "warning"
     else:
         return "🔴 Rủi ro cao", "TỪ CHỐI VAY", "error"
+
+# -----------------------------------------------------------------------
+# PUBLIC LEDGER HELPERS
+# -----------------------------------------------------------------------
+def _short_hash(s: str, head=10, tail=8) -> str:
+    if not isinstance(s, str):
+        s = str(s)
+    if len(s) <= head + tail + 1:
+        return s
+    return s[:head] + "…" + s[-tail:]
+
+def summarize_tx_public(tx: dict) -> str:
+    """Tóm tắt giao dịch theo kiểu public (không lộ dữ liệu nhạy cảm)."""
+    t = str(tx.get("type", "")).upper()
+    if t == "SYSTEM":
+        return "SYSTEM INIT"
+    if t == "TRANSACTION":
+        # Ẩn amount + ẩn customer_id, chỉ nêu sự kiện
+        return f"TX: {tx.get('status_label', 'Giao dịch tín dụng')}"
+    if t == "ACCESS_REQUEST":
+        return "REQUEST: NH B yêu cầu truy cập"
+    if t == "CONSENT":
+        act = str(tx.get("action", "")).upper()
+        return f"CONSENT: {act}"
+    if t == "ACCESS_LOG":
+        return "ACCESS LOG: Hồ sơ được truy cập"
+    return f"{t}"
+
+def build_public_ledger_df(bc) -> pd.DataFrame:
+    rows = []
+    for b in bc.chain:
+        txs = b.transactions or []
+        if not txs:
+            content = "—"
+        elif len(txs) == 1:
+            content = summarize_tx_public(txs[0])
+        else:
+            content = f"{len(txs)} giao dịch (vd: {summarize_tx_public(txs[0])})"
+
+        rows.append({
+            "Block Index": b.index,
+            "Thời gian": format_time(b.timestamp),
+            "Nội dung giao dịch": content,
+            "Hash ID": _short_hash(b.hash, 10, 8),
+        })
+    return pd.DataFrame(rows)
 
 # -----------------------------------------------------------------------
 # BLOCKCHAIN CORE
@@ -389,6 +436,7 @@ with st.sidebar:
             "1. Ngân hàng A - Ghi giao dịch",
             "2. Khách hàng (User App)",
             "3. Ngân hàng B - Gửi yêu cầu & Thẩm định",
+            "4. Sổ cái (Public Ledger)",   # ✅ NEW
         ],
     )
 
@@ -668,3 +716,36 @@ elif menu.startswith("3."):
                     st.warning(msg)
                 else:
                     st.error(msg)
+
+# -----------------------------------------------------------------------
+# 4) PUBLIC LEDGER
+# -----------------------------------------------------------------------
+elif menu.startswith("4."):
+    st.subheader("📜 Sổ cái (Public Ledger)")
+
+    df = build_public_ledger_df(bc)
+    if df.empty:
+        st.info("Chưa có dữ liệu sổ cái.")
+    else:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+    with st.expander("🔎 Xem chi tiết từng Block (Public-safe)"):
+        max_idx = max(0, len(bc.chain) - 1)
+        pick = st.number_input("Chọn Block Index", min_value=0, max_value=max_idx, value=0, step=1)
+        b = bc.chain[int(pick)]
+
+        st.write(f"**Block #{b.index}** | Time: {format_time(b.timestamp)}")
+        st.write(f"**Prev Hash:** {_short_hash(b.previous_hash, 12, 10) if b.previous_hash else '-'}")
+        st.write(f"**Hash:** {_short_hash(b.hash, 12, 10) if b.hash else '-'}")
+        st.write(f"**Nonce:** {b.nonce}")
+
+        tx_rows = []
+        for tx in (b.transactions or []):
+            txh = tx.get("tx_hash", "")
+            tx_rows.append({
+                "Type": tx.get("type", ""),
+                "Public Summary": summarize_tx_public(tx),
+                "Time": format_time(tx.get("time", 0)),
+                "TX Hash": _short_hash(str(txh), 10, 6) if txh else "",
+            })
+        st.dataframe(pd.DataFrame(tx_rows), use_container_width=True, hide_index=True)

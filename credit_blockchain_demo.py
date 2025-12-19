@@ -235,7 +235,7 @@ def calculate_onchain_score_from_chain(bc: Blockchain, customer_id: str):
     base = 650
     txs = bc.customer_transactions(customer_id)
     if not txs:
-        return base, {"Đúng hạn": 0, "Trễ hạn": 0, "Đang vay": 0}
+        return base, {"Trả đúng hạn": 0, "Trả trễ hạn": 0, "Giải ngân - mở khoản vay": 0}
 
     ontime = late = 0
     for _, tx in txs:
@@ -250,7 +250,7 @@ def calculate_onchain_score_from_chain(bc: Blockchain, customer_id: str):
 
     score = base + ontime * 50 - late * 50 + open_flag * 10
     score = max(300, min(850, score))
-    return score, {"Đúng hạn": ontime, "Trễ hạn": late, "Đang vay": open_flag}
+    return score, {"Trả đúng hạn": ontime, " Trả trễ hạn": late, "Giải ngân - mở khoản vay": open_flag}
 
 # -----------------------------------------------------------------------
 # SMART CONTRACT MÔ PHỎNG (Python)
@@ -393,8 +393,8 @@ if menu.startswith("1."):
 
         event_map = {
             "Giải ngân (mở khoản vay)": (0, "Giải ngân - mở khoản vay"),
-            "Trả đúng hạn": (1, "Trả nợ đúng hạn"),
-            "Trả trễ hạn": (2, "Trả nợ trễ hạn"),
+            "Trả đúng hạn": (1, "Trả  đúng hạn"),
+            "Trả trễ hạn": (2, "Trả trễ hạn"),
         }
         event = st.selectbox("Loại sự kiện", list(event_map.keys()))
 

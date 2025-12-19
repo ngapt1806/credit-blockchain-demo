@@ -11,6 +11,7 @@ import datetime
 import json
 import hashlib
 from pathlib import Path
+from zoneinfo import ZoneInfo  # ✅ FIX TIMEZONE
 
 import streamlit as st
 import pandas as pd
@@ -23,6 +24,11 @@ BASE_DIR = Path(__file__).resolve().parent
 CHAIN_FILE = BASE_DIR / "chain.json"
 
 # -----------------------------------------------------------------------
+# TIMEZONE (VN)
+# -----------------------------------------------------------------------
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+# -----------------------------------------------------------------------
 # UTILS
 # -----------------------------------------------------------------------
 def generate_customer_id():
@@ -32,8 +38,10 @@ def generate_tx_hash():
     return "0x" + f"{random.getrandbits(128):032x}"
 
 def format_time(ts: int):
+    """✅ Hiển thị đúng giờ Việt Nam (UTC+7)"""
     try:
-        return datetime.datetime.fromtimestamp(int(ts)).strftime("%d/%m/%Y %H:%M:%S")
+        ts = int(ts)
+        return datetime.datetime.fromtimestamp(ts, tz=VN_TZ).strftime("%d/%m/%Y %H:%M:%S")
     except Exception:
         return "-"
 
@@ -205,7 +213,11 @@ class Blockchain:
         """Request mới nhất + pending nếu sau request chưa có CONSENT."""
         latest_req = None
         for _, tx in self.iter_txs():
-            if tx.get("type") == "ACCESS_REQUEST" and str(tx.get("customer_id")) == str(customer_id) and str(tx.get("requester_bank")) == str(requester_bank):
+            if (
+                tx.get("type") == "ACCESS_REQUEST"
+                and str(tx.get("customer_id")) == str(customer_id)
+                and str(tx.get("requester_bank")) == str(requester_bank)
+            ):
                 t = int(tx.get("time", 0))
                 if latest_req is None or t > int(latest_req.get("time", 0)):
                     latest_req = dict(tx)
@@ -219,7 +231,11 @@ class Blockchain:
         handled_time = None
 
         for _, tx in self.iter_txs():
-            if tx.get("type") == "CONSENT" and str(tx.get("customer_id")) == str(customer_id) and str(tx.get("target_bank")) == str(requester_bank):
+            if (
+                tx.get("type") == "CONSENT"
+                and str(tx.get("customer_id")) == str(customer_id)
+                and str(tx.get("target_bank")) == str(requester_bank)
+            ):
                 t = int(tx.get("time", 0))
                 if t >= req_time:
                     handled = True
@@ -329,7 +345,7 @@ class CreditSharingContractSim:
         new_block = self.bc.mine_pending()
         return tx, new_block
 
-    # NGÂN HÀNG B truy vấn lịch sử (không cần tính/ghi điểm)
+    # NGÂN HÀNG B xem lịch sử (không tính/ghi điểm)
     def bank_b_view_history(self, customer_id: str):
         cid = str(customer_id)
         if not self.is_allowed(cid, self.BANK_B):
@@ -449,6 +465,7 @@ if menu.startswith("1."):
 
 # -----------------------------------------------------------------------
 # 2) KHÁCH HÀNG: NHẬN YÊU CẦU + HIỂN THỊ ĐIỂM (KHÔNG BIỂU ĐỒ)
+# ✅ ĐÃ XÓA phần st.info “Trạng thái hiện tại với Ngân hàng B …”
 # -----------------------------------------------------------------------
 elif menu.startswith("2."):
     st.subheader("👤 Khách hàng: Nhận yêu cầu & quản lý quyền chia sẻ")
@@ -468,7 +485,7 @@ elif menu.startswith("2."):
 
     st.success(f"Khách hàng hiện tại: **{cid}**")
 
-    # ✅ Điểm tín dụng LUÔN có (tính trực tiếp từ chain)
+    # Điểm tín dụng luôn có (tính trực tiếp từ chain)
     score, detail = calculate_onchain_score_from_chain(bc, cid)
     rating, decision, level = credit_decision(int(score))
 
@@ -484,11 +501,7 @@ elif menu.startswith("2."):
     else:
         st.error(msg)
 
-    # trạng thái quyền hiện tại
-    allowed = contract.is_allowed(cid, CreditSharingContractSim.BANK_B)
-    st.info(f"Trạng thái hiện tại với Ngân hàng B: **{'ĐÃ CẤP QUYỀN' if allowed else 'CHƯA CẤP / ĐÃ TỪ CHỐI / ĐÃ THU HỒI'}**")
-
-    # hiển thị yêu cầu mới nhất từ Bank B
+    # Request từ NH B
     st.markdown("### 📨 Yêu cầu truy cập từ Ngân hàng B")
     req = bc.latest_access_request(cid, CreditSharingContractSim.BANK_B)
 
@@ -526,7 +539,7 @@ elif menu.startswith("2."):
                 st.toast("🔒 Đã thu hồi quyền", icon="⛔")
                 st.rerun()
 
-    # lịch sử giao dịch
+    # Lịch sử giao dịch
     st.markdown("### 📄 Lịch sử giao dịch")
     tx_rows = bc.customer_transactions(cid)
     view = []
@@ -552,7 +565,7 @@ elif menu.startswith("2."):
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------
-# 3) NGÂN HÀNG B: GỬI YÊU CẦU -> NẾU ĐƯỢC CẤP THÌ XEM LỊCH SỬ (KHÔNG CẦN TÍNH ĐIỂM)
+# 3) NGÂN HÀNG B: GỬI YÊU CẦU -> NẾU ĐƯỢC CẤP THÌ XEM LỊCH SỬ
 # -----------------------------------------------------------------------
 elif menu.startswith("3."):
     st.subheader("🏦 Ngân hàng B: Gửi yêu cầu truy cập & xem hồ sơ")

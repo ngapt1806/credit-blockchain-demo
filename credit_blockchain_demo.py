@@ -1,8 +1,7 @@
 # =======================================================================
 # credit_blockchain_demo.py
 # HỆ THỐNG CHIA SẺ DỮ LIỆU TÍN DỤNG (Blockchain Chain + Streamlit)
-# Ngân hàng A ghi sự kiện tín dụng | Ngân hàng B gửi yêu cầu | Khách hàng cấp/từ chối/thu hồi
-# + SMART CONTRACT MÔ PHỎNG (Python) cho Request/Consent/Access Log
+# Ngân hàng A ghi sự kiện tín dụng | Ngân hàng B yêu cầu + thẩm định | KH cấp/từ chối/thu hồi
 # =======================================================================
 
 import time
@@ -15,6 +14,7 @@ from zoneinfo import ZoneInfo  # ✅ FIX TIMEZONE
 
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 # -----------------------------------------------------------------------
 # CONFIG
@@ -262,7 +262,7 @@ class Blockchain:
         return {"has_open": has_open, "last_event": last_event}
 
 # -----------------------------------------------------------------------
-# SCORING: KH tự tính trực tiếp từ chain (không cần NH B truy vấn)
+# SCORING (Ngân hàng B dùng để tính và hiển thị)
 # -----------------------------------------------------------------------
 def calculate_onchain_score_from_chain(bc: Blockchain, customer_id: str):
     base = 650
@@ -329,7 +329,7 @@ class CreditSharingContractSim:
         self.bc.add_transaction({"type": "ACCESS_LOG", "customer_id": str(customer_id), "viewer": str(viewer_bank), "msg": "Viewed Profile"})
         self.bc.mine_pending()
 
-    # NGÂN HÀNG A ghi giao dịch (giữ nguyên logic của bạn)
+    # NGÂN HÀNG A ghi giao dịch
     def record_transaction_bank_a(self, customer_id: str, amount: int, repayment_status: int, status_label: str):
         tx = {
             "type": "TRANSACTION",
@@ -345,13 +345,25 @@ class CreditSharingContractSim:
         new_block = self.bc.mine_pending()
         return tx, new_block
 
-    # NGÂN HÀNG B xem lịch sử (không tính/ghi điểm)
-    def bank_b_view_history(self, customer_id: str):
+    # NGÂN HÀNG B: thẩm định (tính điểm + log access)
+    def bank_b_query_and_score(self, customer_id: str):
         cid = str(customer_id)
         if not self.is_allowed(cid, self.BANK_B):
             return None
+
         self.log_access(cid, self.BANK_B)
-        return self.bc.customer_transactions(cid)
+
+        score, detail = calculate_onchain_score_from_chain(self.bc, cid)
+        rating, decision, level = credit_decision(int(score))
+
+        return {
+            "score": int(score),
+            "detail": detail,
+            "rating": rating,
+            "decision": decision,
+            "level": level,
+            "tx_rows": self.bc.customer_transactions(cid),
+        }
 
 # -----------------------------------------------------------------------
 # SESSION STATE
@@ -380,7 +392,7 @@ with st.sidebar:
         [
             "1. Ngân hàng A - Ghi giao dịch",
             "2. Khách hàng (User App)",
-            "3. Ngân hàng B - Gửi yêu cầu & Xem hồ sơ",
+            "3. Ngân hàng B - Thẩm định",
         ],
     )
 
@@ -464,8 +476,7 @@ if menu.startswith("1."):
                 st.code(f"TX Hash: {tx['tx_hash']}\nTime: {format_time(tx['time'])}")
 
 # -----------------------------------------------------------------------
-# 2) KHÁCH HÀNG: NHẬN YÊU CẦU + HIỂN THỊ ĐIỂM (KHÔNG BIỂU ĐỒ)
-# ✅ ĐÃ XÓA phần st.info “Trạng thái hiện tại với Ngân hàng B …”
+# 2) KHÁCH HÀNG: CHỈ NHẬN YÊU CẦU + QUẢN LÝ QUYỀN + XEM LỊCH SỬ (KHÔNG ĐIỂM)
 # -----------------------------------------------------------------------
 elif menu.startswith("2."):
     st.subheader("👤 Khách hàng: Nhận yêu cầu & quản lý quyền chia sẻ")
@@ -484,22 +495,6 @@ elif menu.startswith("2."):
     st.session_state.active_customer = str(cid)
 
     st.success(f"Khách hàng hiện tại: **{cid}**")
-
-    # Điểm tín dụng luôn có (tính trực tiếp từ chain)
-    score, detail = calculate_onchain_score_from_chain(bc, cid)
-    rating, decision, level = credit_decision(int(score))
-
-    st.markdown("### 📈 Điểm tín dụng")
-    st.metric("Điểm tín dụng", int(score))
-    st.caption(f"Chi tiết: Đúng hạn={detail['Đúng hạn']} | Trễ hạn={detail['Trễ hạn']} | Đang vay={detail['Đang vay']}")
-
-    msg = f"**Xếp hạng:** {rating}\n\n**Khuyến nghị:** {decision}"
-    if level == "success":
-        st.success(msg)
-    elif level == "warning":
-        st.warning(msg)
-    else:
-        st.error(msg)
 
     # Request từ NH B
     st.markdown("### 📨 Yêu cầu truy cập từ Ngân hàng B")
@@ -554,21 +549,11 @@ elif menu.startswith("2."):
         )
     st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
 
-    with st.expander("🕵️ Nhật ký truy cập (Access Logs)"):
-        logs = bc.access_logs(cid)
-        if not logs:
-            st.write("—")
-        else:
-            rows = []
-            for _, tx in logs:
-                rows.append({"Thời gian": format_time(tx.get("time", 0)), "Người xem": tx.get("viewer", "")})
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
 # -----------------------------------------------------------------------
-# 3) NGÂN HÀNG B: GỬI YÊU CẦU -> NẾU ĐƯỢC CẤP THÌ XEM LỊCH SỬ
+# 3) NGÂN HÀNG B: THẨM ĐỊNH (CÓ ĐIỂM + BIỂU ĐỒ BÌNH THƯỜNG)
 # -----------------------------------------------------------------------
 elif menu.startswith("3."):
-    st.subheader("🏦 Ngân hàng B: Gửi yêu cầu truy cập & xem hồ sơ")
+    st.subheader("🏦 Ngân hàng B: Truy vấn & đánh giá tín dụng")
 
     customers = bc.list_customers()
     customers = [c for c in customers if len(bc.customer_transactions(c)) > 0]
@@ -579,6 +564,7 @@ elif menu.startswith("3."):
     pick_cid = st.selectbox("Chọn khách hàng cần thẩm định", customers)
     st.session_state.active_customer = str(pick_cid)
 
+    # Banner xanh nhạt
     st.markdown(
         f"""
         <div style="
@@ -598,55 +584,59 @@ elif menu.startswith("3."):
         unsafe_allow_html=True,
     )
 
-    req = bc.latest_access_request(pick_cid, CreditSharingContractSim.BANK_B)
     allowed = contract.is_allowed(pick_cid, CreditSharingContractSim.BANK_B)
+    st.info(f"Quyền truy cập: {'✅ ĐƯỢC CẤP' if allowed else '⛔ CHƯA ĐƯỢC CẤP'}")
 
-    c1, c2 = st.columns([2, 3], gap="large")
+    if st.button("🔍 Truy vấn dữ liệu & tính điểm", use_container_width=True):
+        result = contract.bank_b_query_and_score(pick_cid)
+        if result is None:
+            st.error("⛔ Không có quyền truy cập (KH chưa cấp quyền).")
+            st.stop()
 
-    with c1:
-        st.markdown("### 📨 Trạng thái yêu cầu")
-        if not req:
-            st.write("Chưa gửi yêu cầu.")
-        else:
-            if req.get("pending"):
-                st.warning(f"Đã gửi - đang chờ KH xử lý | {format_time(req.get('time',0))}")
+        bc.save()
+
+        score = result["score"]
+        detail = result["detail"]
+        rating = result["rating"]
+        decision = result["decision"]
+        level = result["level"]
+        tx_rows = result["tx_rows"]
+
+        left, right = st.columns([3, 2], gap="large")
+
+        with left:
+            st.markdown("### 📄 Lịch sử tín dụng")
+            view = []
+            for _, tx in tx_rows:
+                txh = tx.get("tx_hash", "")
+                txh_short = (txh[:10] + "…" + txh[-6:]) if isinstance(txh, str) and len(txh) > 20 else txh
+                view.append(
+                    {
+                        "Thời gian": format_time(tx.get("time", 0)),
+                        "Sự kiện": tx.get("status_label", ""),
+                        "Số tiền (VND)": int(tx.get("amount", 0)),
+                        "TX Hash": txh_short,
+                    }
+                )
+            st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
+
+        with right:
+            st.markdown("### 📈 Điểm & đánh giá")
+            st.metric("Điểm tín dụng", int(score))
+
+            pie = pd.DataFrame(detail.items(), columns=["Loại", "Số lượng"])
+            fig = px.pie(pie, values="Số lượng", names="Loại", hole=0.45)
+            fig.update_layout(
+                height=280,
+                margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            msg = f"**Xếp hạng:** {rating}\n\n**Khuyến nghị:** {decision}"
+            if level == "success":
+                st.success(msg)
+            elif level == "warning":
+                st.warning(msg)
             else:
-                st.info(f"KH đã xử lý: **{req.get('handled_action','-')}** | {format_time(req.get('handled_time') or 0)}")
-
-        purpose = st.text_input("Mục đích truy cập", value="Thẩm định tín dụng")
-        if st.button("📨 GỬI YÊU CẦU XEM HỒ SƠ", use_container_width=True):
-            contract.bank_b_send_access_request(pick_cid, purpose=purpose)
-            bc.save()
-            st.toast("Đã gửi yêu cầu cho khách hàng", icon="📨")
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("### 🔐 Quyền hiện tại")
-        st.write("✅ Được cấp quyền" if allowed else "⛔ Chưa được cấp quyền")
-
-    with c2:
-        st.markdown("### 🔍 Xem lịch sử tín dụng")
-        if not allowed:
-            st.error("⛔ Chưa có quyền truy cập. Hãy gửi yêu cầu và chờ khách hàng cấp quyền.")
-        else:
-            if st.button("🔍 TRUY VẤN HỒ SƠ", use_container_width=True):
-                tx_rows = contract.bank_b_view_history(pick_cid)
-                if tx_rows is None:
-                    st.error("⛔ Không có quyền truy cập.")
-                    st.stop()
-                bc.save()
-
-                view = []
-                for _, tx in tx_rows:
-                    txh = tx.get("tx_hash", "")
-                    txh_short = (txh[:10] + "…" + txh[-6:]) if isinstance(txh, str) and len(txh) > 20 else txh
-                    view.append(
-                        {
-                            "Thời gian": format_time(tx.get("time", 0)),
-                            "Sự kiện": tx.get("status_label", ""),
-                            "Số tiền (VND)": int(tx.get("amount", 0)),
-                            "TX Hash": txh_short,
-                        }
-                    )
-                st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
-                st.toast("✅ Đã ghi Access Log", icon="✅")
+                st.error(msg)

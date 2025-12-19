@@ -545,42 +545,43 @@ elif menu.startswith("2."):
     st.metric("Điểm tín dụng", int(score))
 
     # Request từ NH B
-    st.markdown("### 📨 Yêu cầu truy cập từ Ngân hàng B")
-    req = bc.latest_access_request(cid, CreditSharingContractSim.BANK_B)
+   req = bc.latest_access_request(cid, CreditSharingContractSim.BANK_B)
 
-    if not req:
-        st.write("— Chưa có yêu cầu nào từ Ngân hàng B.")
-    else:
-        if req.get("pending"):
-            st.warning(f"**PENDING** | {format_time(req.get('time',0))} | Mục đích: {req.get('purpose','-')}")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                if st.button("✅ CẤP QUYỀN", use_container_width=True):
-                    contract.grant_consent_to_bank_b(cid)
-                    bc.save()
-                    st.toast("🔐 Đã cấp quyền cho Ngân hàng B", icon="✅")
-                    st.rerun()
-            with c2:
-                if st.button("❌ TỪ CHỐI", use_container_width=True):
-                    contract.deny_consent_to_bank_b(cid)
-                    bc.save()
-                    st.toast("🚫 Đã từ chối yêu cầu", icon="⛔")
-                    st.rerun()
-            with c3:
-                if st.button("🧹 THU HỒI (REVOKE)", use_container_width=True):
-                    contract.revoke_consent_from_bank_b(cid)
-                    bc.save()
-                    st.toast("🔒 Đã thu hồi quyền", icon="⛔")
-                    st.rerun()
-        else:
-            action = req.get("handled_action") or "-"
-            ht = req.get("handled_time")
-            st.info(f"Đã xử lý yêu cầu | Kết quả: **{action}** | Lúc: {format_time(ht) if ht else '-'}")
-            if st.button("🧹 THU HỒI QUYỀN (REVOKE)"):
+# ✅ CHỈ HIỂN THỊ KHI CÓ YÊU CẦU
+if req:
+    st.markdown("### 📨 Yêu cầu truy cập từ Ngân hàng B")
+
+    if req.get("pending"):
+        st.warning(f"**PENDING** | {format_time(req.get('time',0))} | Mục đích: {req.get('purpose','-')}")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("✅ CẤP QUYỀN", use_container_width=True):
+                contract.grant_consent_to_bank_b(cid)
+                bc.save()
+                st.toast("🔐 Đã cấp quyền cho Ngân hàng B", icon="✅")
+                st.rerun()
+        with c2:
+            if st.button("❌ TỪ CHỐI", use_container_width=True):
+                contract.deny_consent_to_bank_b(cid)
+                bc.save()
+                st.toast("🚫 Đã từ chối yêu cầu", icon="⛔")
+                st.rerun()
+        with c3:
+            if st.button("🧹 THU HỒI (REVOKE)", use_container_width=True):
                 contract.revoke_consent_from_bank_b(cid)
                 bc.save()
                 st.toast("🔒 Đã thu hồi quyền", icon="⛔")
                 st.rerun()
+    else:
+        action = req.get("handled_action") or "-"
+        ht = req.get("handled_time")
+        st.info(f"Đã xử lý yêu cầu | Kết quả: **{action}** | Lúc: {format_time(ht) if ht else '-'}")
+
+        if st.button("🧹 THU HỒI QUYỀN (REVOKE)"):
+            contract.revoke_consent_from_bank_b(cid)
+            bc.save()
+            st.toast("🔒 Đã thu hồi quyền", icon="⛔")
+            st.rerun()
 
     # Lịch sử giao dịch
     st.markdown("### 📄 Lịch sử giao dịch")
@@ -596,6 +597,23 @@ elif menu.startswith("2."):
             }
         )
     st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
+    
+    st.markdown("### 🕵️ Lịch sử người xem")
+    logs = bc.access_logs(cid)
+    if not logs:
+         st.info("Chưa có lượt truy cập nào.")
+    else:
+         rows = []
+         for _, tx in logs:
+           rows.append(
+            {
+                "Type": tx.get("type", ""),                 # ACCESS_LOG
+                "Viewer": tx.get("viewer", ""),             # Ngân hàng B
+                "Time": format_time(tx.get("time", 0)),     # giờ VN
+            }
+          )
+      st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
 
 # -----------------------------------------------------------------------
 # -----------------------------------------------------------------------

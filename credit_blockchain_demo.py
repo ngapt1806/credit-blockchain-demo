@@ -690,7 +690,6 @@ elif menu.startswith("3."):
                         {
                             "Thời gian": format_time(tx.get("time", 0)),
                             "Sự kiện": tx.get("status_label", ""),
-                            "Số tiền (VND)": int(tx.get("amount", 0)),
                             "TX Hash": txh_short,
                         }
                     )

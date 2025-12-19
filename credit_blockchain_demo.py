@@ -658,8 +658,8 @@ elif menu.startswith("3."):
         st.write("✅ Được cấp quyền" if allowed else "⛔ Chưa được cấp quyền")
 
         st.markdown("---")
-        st.markdown("### 🔍 Thẩm định")
-        run = st.button("🔍 TRUY VẤN DỮ LIỆU & TÍNH ĐIỂM", use_container_width=True)
+        st.markdown("### 🔍 Tra cứu ")
+        run = st.button("🔍 TRA CỨU DỮ LIỆU ", use_container_width=True)
 
     with right:
         st.markdown("### 📊 Kết quả thẩm định")

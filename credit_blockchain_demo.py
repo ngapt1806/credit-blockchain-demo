@@ -435,7 +435,7 @@ with st.sidebar:
         [
             "1. Ngân hàng A - Ghi giao dịch",
             "2. Khách hàng (User App)",
-            "3. Ngân hàng B - Gửi yêu cầu & Thẩm định",
+            "3. Ngân hàng B - Gửi yêu cầu & Tra cứu",
             "4. Sổ cái (Public Ledger)",   # ✅ NEW
         ],
     )
@@ -601,7 +601,7 @@ elif menu.startswith("2."):
 # 3) NGÂN HÀNG B: GỬI YÊU CẦU + THẨM ĐỊNH (CÓ ĐIỂM + BIỂU ĐỒ + ĐÁNH GIÁ)
 # -----------------------------------------------------------------------
 elif menu.startswith("3."):
-    st.subheader("🏦 Ngân hàng B: Gửi yêu cầu & thẩm định tín dụng")
+    st.subheader("🏦 Ngân hàng B: Gửi yêu cầu & tra cứu tín dụng")
 
     customers = bc.list_customers()
     customers = [c for c in customers if len(bc.customer_transactions(c)) > 0]
@@ -609,7 +609,7 @@ elif menu.startswith("3."):
         st.info("Chưa có khách hàng. Hãy sang 'Ngân hàng A' để tạo giao dịch trước.")
         st.stop()
 
-    pick_cid = st.selectbox("Chọn khách hàng cần thẩm định", customers)
+    pick_cid = st.selectbox("Khách hàng cần tra cứu", customers)
     st.session_state.active_customer = str(pick_cid)
 
     st.markdown(
@@ -646,7 +646,7 @@ elif menu.startswith("3."):
             else:
                 st.info(f"KH đã xử lý: **{req.get('handled_action','-')}** | {format_time(req.get('handled_time') or 0)}")
 
-        purpose = st.text_input("Mục đích truy cập", value="Thẩm định tín dụng")
+        purpose = st.text_input("Mục đích truy cập", value="Tra cứu tín dụng")
         if st.button("📨 GỬI YÊU CẦU XEM HỒ SƠ", use_container_width=True):
             contract.bank_b_send_access_request(pick_cid, purpose=purpose)
             bc.save()
@@ -662,7 +662,7 @@ elif menu.startswith("3."):
         run = st.button("🔍 TRA CỨU DỮ LIỆU ", use_container_width=True)
 
     with right:
-        st.markdown("### 📊 Kết quả thẩm định")
+        st.markdown("### 📊 Kết quả tra cứu")
         if not allowed:
             st.error("⛔ Chưa có quyền truy cập. Hãy gửi yêu cầu và chờ khách hàng cấp quyền.")
         else:

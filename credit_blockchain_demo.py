@@ -727,24 +727,3 @@ elif menu.startswith("4."):
         st.info("Chưa có dữ liệu sổ cái.")
     else:
         st.dataframe(df, use_container_width=True, hide_index=True)
-
-    with st.expander("🔎 Xem chi tiết từng Block (Public-safe)"):
-        max_idx = max(0, len(bc.chain) - 1)
-        pick = st.number_input("Chọn Block Index", min_value=0, max_value=max_idx, value=0, step=1)
-        b = bc.chain[int(pick)]
-
-        st.write(f"**Block #{b.index}** | Time: {format_time(b.timestamp)}")
-        st.write(f"**Prev Hash:** {_short_hash(b.previous_hash, 12, 10) if b.previous_hash else '-'}")
-        st.write(f"**Hash:** {_short_hash(b.hash, 12, 10) if b.hash else '-'}")
-        st.write(f"**Nonce:** {b.nonce}")
-
-        tx_rows = []
-        for tx in (b.transactions or []):
-            txh = tx.get("tx_hash", "")
-            tx_rows.append({
-                "Type": tx.get("type", ""),
-                "Public Summary": summarize_tx_public(tx),
-                "Time": format_time(tx.get("time", 0)),
-                "TX Hash": _short_hash(str(txh), 10, 6) if txh else "",
-            })
-        st.dataframe(pd.DataFrame(tx_rows), use_container_width=True, hide_index=True)

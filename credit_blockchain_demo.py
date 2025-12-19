@@ -598,6 +598,7 @@ elif menu.startswith("2."):
     st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # 3) NGÂN HÀNG B: GỬI YÊU CẦU + THẨM ĐỊNH (CÓ ĐIỂM + BIỂU ĐỒ + ĐÁNH GIÁ)
 # -----------------------------------------------------------------------
 elif menu.startswith("3."):
@@ -636,85 +637,83 @@ elif menu.startswith("3."):
 
     left, right = st.columns([2, 3], gap="large")
 
-with left:
-    st.markdown("### 📨 Trạng thái yêu cầu")
-    if not req:
-        st.write("Chưa gửi yêu cầu.")
-    else:
-        if req.get("pending"):
-            st.warning(f"Đã gửi - đang chờ KH xử lý | {format_time(req.get('time',0))}")
+    with left:
+        st.markdown("### 📨 Trạng thái yêu cầu")
+        if not req:
+            st.write("Chưa gửi yêu cầu.")
         else:
-            st.info(f"KH đã xử lý: **{req.get('handled_action','-')}** | {format_time(req.get('handled_time') or 0)}")
-
-    purpose = st.text_input("Mục đích truy cập", value="Thẩm định tín dụng")
-    if st.button("📨 GỬI YÊU CẦU XEM HỒ SƠ", use_container_width=True):
-        contract.bank_b_send_access_request(pick_cid, purpose=purpose)
-        bc.save()
-        st.toast("Đã gửi yêu cầu cho khách hàng", icon="📨")
-        st.rerun()
-
-    st.markdown("---")
-    st.markdown("### 🔐 Quyền hiện tại")
-    st.write("✅ Được cấp quyền" if allowed else "⛔ Chưa được cấp quyền")
-
-
-with right:
-    # ✅ Đưa nút tra cứu lên trên
-    st.markdown("### 🔎 Tra cứu")
-    run = st.button("🔍 TRA CỨU DỮ LIỆU", use_container_width=True)
-
-    st.markdown("### 📊 Kết quả tra cứu")
-
-    if not allowed:
-        st.error("⛔ Chưa có quyền truy cập. Hãy gửi yêu cầu và chờ khách hàng cấp quyền.")
-    else:
-        if run:
-            result = contract.bank_b_query_and_score(pick_cid)
-            if result is None:
-                st.error("⛔ Không có quyền truy cập.")
-                st.stop()
-            bc.save()
-
-            score = result["score"]
-            detail = result["detail"]
-            rating = result["rating"]
-            decision = result["decision"]
-            level = result["level"]
-            tx_rows = result["tx_rows"]
-
-            st.markdown("#### 📄 Lịch sử tín dụng")
-            view = []
-            for _, tx in tx_rows:
-                txh = tx.get("tx_hash", "")
-                txh_short = (txh[:10] + "…" + txh[-6:]) if isinstance(txh, str) and len(txh) > 20 else txh
-                view.append(
-                    {
-                        "Thời gian": format_time(tx.get("time", 0)),
-                        "Sự kiện": tx.get("status_label", ""),
-                        "TX Hash": txh_short,
-                    }
-                )
-            st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
-
-            st.markdown("#### 📈 Điểm & đánh giá")
-            st.metric("Điểm tín dụng", int(score))
-
-            pie = pd.DataFrame(detail.items(), columns=["Loại", "Số lượng"])
-            fig = px.pie(pie, values="Số lượng", names="Loại", hole=0.45)
-            fig.update_layout(
-                height=280,
-                margin=dict(l=10, r=10, t=10, b=10),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            msg = f"**Xếp hạng:** {rating}\n\n**Khuyến nghị:** {decision}"
-            if level == "success":
-                st.success(msg)
-            elif level == "warning":
-                st.warning(msg)
+            if req.get("pending"):
+                st.warning(f"Đã gửi - đang chờ KH xử lý | {format_time(req.get('time',0))}")
             else:
-                st.error(msg)
+                st.info(f"KH đã xử lý: **{req.get('handled_action','-')}** | {format_time(req.get('handled_time') or 0)}")
+
+        purpose = st.text_input("Mục đích truy cập", value="Thẩm định tín dụng")
+        if st.button("📨 GỬI YÊU CẦU XEM HỒ SƠ", use_container_width=True):
+            contract.bank_b_send_access_request(pick_cid, purpose=purpose)
+            bc.save()
+            st.toast("Đã gửi yêu cầu cho khách hàng", icon="📨")
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("### 🔐 Quyền hiện tại")
+        st.write("✅ Được cấp quyền" if allowed else "⛔ Chưa được cấp quyền")
+
+    with right:
+        st.markdown("### 🔎 Tra cứu")
+        run = st.button("🔍 TRA CỨU DỮ LIỆU", use_container_width=True)
+
+        st.markdown("### 📊 Kết quả tra cứu")
+
+        if not allowed:
+            st.error("⛔ Chưa có quyền truy cập. Hãy gửi yêu cầu và chờ khách hàng cấp quyền.")
+        else:
+            if run:
+                result = contract.bank_b_query_and_score(pick_cid)
+                if result is None:
+                    st.error("⛔ Không có quyền truy cập.")
+                    st.stop()
+                bc.save()
+
+                score = result["score"]
+                detail = result["detail"]
+                rating = result["rating"]
+                decision = result["decision"]
+                level = result["level"]
+                tx_rows = result["tx_rows"]
+
+                st.markdown("#### 📄 Lịch sử tín dụng")
+                view = []
+                for _, tx in tx_rows:
+                    txh = tx.get("tx_hash", "")
+                    txh_short = (txh[:10] + "…" + txh[-6:]) if isinstance(txh, str) and len(txh) > 20 else txh
+                    view.append(
+                        {
+                            "Thời gian": format_time(tx.get("time", 0)),
+                            "Sự kiện": tx.get("status_label", ""),
+                            "TX Hash": txh_short,
+                        }
+                    )
+                st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
+
+                st.markdown("#### 📈 Điểm & đánh giá")
+                st.metric("Điểm tín dụng", int(score))
+
+                pie = pd.DataFrame(detail.items(), columns=["Loại", "Số lượng"])
+                fig = px.pie(pie, values="Số lượng", names="Loại", hole=0.45)
+                fig.update_layout(
+                    height=280,
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                msg = f"**Xếp hạng:** {rating}\n\n**Khuyến nghị:** {decision}"
+                if level == "success":
+                    st.success(msg)
+                elif level == "warning":
+                    st.warning(msg)
+                else:
+                    st.error(msg)
 
 # -----------------------------------------------------------------------
 # 4) PUBLIC LEDGER

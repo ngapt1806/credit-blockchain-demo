@@ -688,7 +688,7 @@ elif menu.startswith("3."):
 
     with right:
         st.markdown("### 🔎 Tra cứu")
-        run = st.button("🔍 TRA CỨU DỮ LIỆU", use_container_width=True)
+        run = st.button("🔍 TRA CỨU ĐIỂM TÍN DỤNG ", use_container_width=True)
 
         st.markdown("### 📊 Kết quả tra cứu")
 

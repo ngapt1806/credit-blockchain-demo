@@ -3,6 +3,7 @@
 # HỆ THỐNG CHIA SẺ DỮ LIỆU TÍN DỤNG (Blockchain Chain + Streamlit)
 # Ngân hàng A ghi sự kiện tín dụng | Ngân hàng B gửi yêu cầu & thẩm định | KH cấp/từ chối/thu hồi
 # + SỔ CÁI CÔNG KHAI (Public Ledger)
+# + OFF-CHAIN STORAGE: lưu chi tiết nhạy cảm (amount) trong offchain_db.json
 # =======================================================================
 
 import time
@@ -25,7 +26,6 @@ BASE_DIR = Path(__file__).resolve().parent
 CHAIN_FILE = BASE_DIR / "chain.json"
 OFFCHAIN_FILE = BASE_DIR / "offchain_db.json"
 
-
 # -----------------------------------------------------------------------
 # TIMEZONE (VN)
 # -----------------------------------------------------------------------
@@ -47,6 +47,8 @@ def format_time(ts: int):
         return datetime.datetime.fromtimestamp(ts, tz=VN_TZ).strftime("%d/%m/%Y %H:%M:%S")
     except Exception:
         return "-"
+
+# ---------------- OFF-CHAIN HELPERS ----------------
 def offchain_load(path=OFFCHAIN_FILE) -> dict:
     if path.exists():
         try:
@@ -368,63 +370,83 @@ class CreditSharingContractSim:
         return tx
 
     def grant_consent_to_bank_b(self, customer_id: str):
-        self.bc.add_transaction({"type": "CONSENT", "customer_id": str(customer_id), "target_bank": self.BANK_B, "action": "GRANT"})
+        self.bc.add_transaction({
+            "type": "CONSENT",
+            "customer_id": str(customer_id),
+            "target_bank": self.BANK_B,
+            "action": "GRANT",
+        })
         self.bc.mine_pending()
 
     def deny_consent_to_bank_b(self, customer_id: str):
-        self.bc.add_transaction({"type": "CONSENT", "customer_id": str(customer_id), "target_bank": self.BANK_B, "action": "DENY"})
+        self.bc.add_transaction({
+            "type": "CONSENT",
+            "customer_id": str(customer_id),
+            "target_bank": self.BANK_B,
+            "action": "DENY",
+        })
         self.bc.mine_pending()
 
     def revoke_consent_from_bank_b(self, customer_id: str):
-        self.bc.add_transaction({"type": "CONSENT", "customer_id": str(customer_id), "target_bank": self.BANK_B, "action": "REVOKE"})
+        self.bc.add_transaction({
+            "type": "CONSENT",
+            "customer_id": str(customer_id),
+            "target_bank": self.BANK_B,
+            "action": "REVOKE",
+        })
         self.bc.mine_pending()
 
     def is_allowed(self, customer_id: str, bank_name: str) -> bool:
         return self.bc.check_permission(str(customer_id), str(bank_name))
 
     def log_access(self, customer_id: str, viewer_bank: str):
-        self.bc.add_transaction({"type": "ACCESS_LOG", "customer_id": str(customer_id), "viewer": str(viewer_bank), "msg": "Viewed Profile"})
+        self.bc.add_transaction({
+            "type": "ACCESS_LOG",
+            "customer_id": str(customer_id),
+            "viewer": str(viewer_bank),
+            "msg": "Viewed Profile",
+            "time": int(time.time()),
+        })
         self.bc.mine_pending()
 
+    # ✅ Bank A ghi giao dịch: OFF-CHAIN lưu amount, ON-CHAIN lưu hash tham chiếu
     def record_transaction_bank_a(self, customer_id: str, amount: int, repayment_status: int, status_label: str):
-          txh = generate_tx_hash()
+        txh = generate_tx_hash()
 
-           # ✅ OFF-CHAIN: lưu chi tiết (nhạy cảm)
-           detail = {
-                 "customer_id": str(customer_id),
-                 "amount": int(amount),
-                 "currency": "VND",
-                 "created_at": int(time.time()),
-            }
+        # ✅ OFF-CHAIN: lưu chi tiết (nhạy cảm)
+        detail = {
+            "customer_id": str(customer_id),
+            "amount": int(amount),
+            "currency": "VND",
+            "created_at": int(time.time()),
+        }
+        db = offchain_load()
+        db[txh] = detail
+        offchain_save(db)
 
-            db = offchain_load()
-            db[txh] = detail
-            offchain_save(db)
+        # ✅ ON-CHAIN: chỉ lưu metadata + hash để kiểm chứng toàn vẹn off-chain
+        tx = {
+            "type": "TRANSACTION",
+            "bank": self.BANK_A,
+            "customer_id": str(customer_id),
 
-           # ✅ ON-CHAIN: chỉ lưu metadata + hash để kiểm chứng
-           tx = {
-               "type": "TRANSACTION",
-               "bank": self.BANK_A,
-               "customer_id": str(customer_id),
+            "repayment_status": int(repayment_status),
+            "status_label": str(status_label),
 
-               "repayment_status": int(repayment_status),
-               "status_label": str(status_label),
+            "tx_hash": txh,
+            "offchain_ref": txh,
+            "offchain_hash": hashlib.sha256(
+                json.dumps(detail, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest(),
 
-               "tx_hash": txh,
-               "offchain_ref": txh,
-               "offchain_hash": hashlib.sha256(
-               json.dumps(detail, sort_keys=True, ensure_ascii=False).encode("utf-8")
-              ).hexdigest(),
+            "time": int(time.time()),
+        }
 
-              "time": int(time.time()),
-            }
+        self.bc.add_transaction(tx)
+        new_block = self.bc.mine_pending()
+        return tx, new_block
 
-            self.bc.add_transaction(tx)
-            new_block = self.bc.mine_pending()
-            return tx, new_block
-
-
-    # ✅ Ngân hàng B: truy vấn + tính điểm + đánh giá
+    # ✅ Bank B: truy vấn + tính điểm + đánh giá
     def bank_b_query_and_score(self, customer_id: str):
         cid = str(customer_id)
         if not self.is_allowed(cid, self.BANK_B):
@@ -471,7 +493,7 @@ with st.sidebar:
             "1. Ngân hàng A - Ghi giao dịch",
             "2. Khách hàng (User App)",
             "3. Ngân hàng B - Gửi yêu cầu & Tra cứu",
-            "4. Sổ cái (Public Ledger)",   # ✅ NEW
+            "4. Sổ cái (Public Ledger)",
         ],
     )
 
@@ -482,6 +504,8 @@ with st.sidebar:
         try:
             if CHAIN_FILE.exists():
                 CHAIN_FILE.unlink()
+            if OFFCHAIN_FILE.exists():  # ✅ reset luôn off-chain
+                OFFCHAIN_FILE.unlink()
         except Exception:
             pass
         st.toast("Đã reset hệ thống", icon="✅")
@@ -554,7 +578,6 @@ if menu.startswith("1."):
                 st.code(f"TX Hash: {tx['tx_hash']}\nTime: {format_time(tx['time'])}")
 
 # -----------------------------------------------------------------------
-# -----------------------------------------------------------------------
 # 2) KHÁCH HÀNG: CÓ ĐIỂM (CHỈ SỐ), KHÔNG CHI TIẾT & KHÔNG XẾP HẠNG
 # -----------------------------------------------------------------------
 elif menu.startswith("2."):
@@ -587,9 +610,7 @@ elif menu.startswith("2."):
         st.markdown("### 📨 Yêu cầu truy cập từ Ngân hàng B")
 
         if req.get("pending"):
-            st.warning(
-                f"**PENDING** | {format_time(req.get('time', 0))} | Mục đích: {req.get('purpose', '-')}"
-            )
+            st.warning(f"**PENDING** | {format_time(req.get('time', 0))} | Mục đích: {req.get('purpose', '-')}")
             c1, c2, c3 = st.columns(3)
             with c1:
                 if st.button("✅ CẤP QUYỀN", use_container_width=True):
@@ -612,9 +633,7 @@ elif menu.startswith("2."):
         else:
             action = req.get("handled_action") or "-"
             ht = req.get("handled_time")
-            st.info(
-                f"Đã xử lý yêu cầu | Kết quả: **{action}** | Lúc: {format_time(ht) if ht else '-'}"
-            )
+            st.info(f"Đã xử lý yêu cầu | Kết quả: **{action}** | Lúc: {format_time(ht) if ht else '-'}")
 
             if st.button("🧹 THU HỒI QUYỀN (REVOKE)"):
                 contract.revoke_consent_from_bank_b(cid)
@@ -623,24 +642,25 @@ elif menu.startswith("2."):
                 st.rerun()
 
     # -------------------------------------------------------------------
+    # 📄 Lịch sử giao dịch (KH thấy amount từ OFF-CHAIN)
+    # -------------------------------------------------------------------
     st.markdown("### 📄 Lịch sử giao dịch")
     tx_rows = bc.customer_transactions(cid)
 
-    db = offchain_load()   # ✅ đọc off-chain 1 lần
+    db = offchain_load()
     view = []
     for _, tx in tx_rows:
-           ref = tx.get("offchain_ref") or tx.get("tx_hash")
-           amount = db.get(ref, {}).get("amount", 0)
+        ref = tx.get("offchain_ref") or tx.get("tx_hash")
+        amount = db.get(ref, {}).get("amount", 0)
 
-           view.append({
-                "Thời gian": format_time(tx.get("time", 0)),
-                "Sự kiện": tx.get("status_label", ""),
-                "Số tiền (VND)": int(amount),     # ✅ lấy từ off-chain
-                "TX Hash": tx.get("tx_hash", ""),
-           })
+        view.append({
+            "Thời gian": format_time(tx.get("time", 0)),
+            "Sự kiện": tx.get("status_label", ""),
+            "Số tiền (VND)": int(amount),
+            "TX Hash": tx.get("tx_hash", ""),
+        })
 
     st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
-
 
     # -------------------------------------------------------------------
     # 🕵️ Lịch sử người xem (Access Logs)
@@ -653,19 +673,15 @@ elif menu.startswith("2."):
     else:
         rows = []
         for _, tx in logs:
-            rows.append(
-                {
-                    "Type": tx.get("type", ""),              # ACCESS_LOG
-                    "Viewer": tx.get("viewer", ""),          # Ngân hàng B
-                    "Time": format_time(tx.get("time", 0)),  # giờ VN
-                }
-            )
+            rows.append({
+                "Type": tx.get("type", ""),
+                "Viewer": tx.get("viewer", ""),
+                "Time": format_time(tx.get("time", 0)),
+            })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-
 # -----------------------------------------------------------------------
-# -----------------------------------------------------------------------
-# 3) NGÂN HÀNG B: GỬI YÊU CẦU + THẨM ĐỊNH (CÓ ĐIỂM + BIỂU ĐỒ + ĐÁNH GIÁ)
+# 3) NGÂN HÀNG B: GỬI YÊU CẦU + THẨM ĐỊNH
 # -----------------------------------------------------------------------
 elif menu.startswith("3."):
     st.subheader("🏦 Ngân hàng B: Gửi yêu cầu & tra cứu tín dụng")
@@ -726,7 +742,7 @@ elif menu.startswith("3."):
 
     with right:
         st.markdown("### 🔎 Tra cứu")
-        run = st.button("🔍 TRA CỨU ĐIỂM TÍN DỤNG ", use_container_width=True)
+        run = st.button("🔍 TRA CỨU ĐIỂM TÍN DỤNG", use_container_width=True)
 
         st.markdown("### 📊 Kết quả tra cứu")
 
@@ -747,18 +763,16 @@ elif menu.startswith("3."):
                 level = result["level"]
                 tx_rows = result["tx_rows"]
 
-                st.markdown("#### 📄 Lịch sử tín dụng")
+                st.markdown("#### 📄 Lịch sử tín dụng (On-chain)")
                 view = []
                 for _, tx in tx_rows:
                     txh = tx.get("tx_hash", "")
                     txh_short = (txh[:10] + "…" + txh[-6:]) if isinstance(txh, str) and len(txh) > 20 else txh
-                    view.append(
-                        {
-                            "Thời gian": format_time(tx.get("time", 0)),
-                            "Sự kiện": tx.get("status_label", ""),
-                            "TX Hash": txh_short,
-                        }
-                    )
+                    view.append({
+                        "Thời gian": format_time(tx.get("time", 0)),
+                        "Sự kiện": tx.get("status_label", ""),
+                        "TX Hash": txh_short,
+                    })
                 st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
 
                 st.markdown("#### 📈 Điểm & đánh giá")

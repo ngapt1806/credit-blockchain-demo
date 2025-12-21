@@ -839,6 +839,14 @@ elif menu.startswith("3."):
 
                 st.markdown("#### 📈 Điểm & đánh giá")
                 st.metric("Điểm tín dụng", int(score))
+                pie = pd.DataFrame(detail.items(), columns=["Loại", "Số lượng"])
+                fig = px.pie(pie, values="Số lượng", names="Loại", hole=0.45)
+                fig.update_layout(
+                    height=280,
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
                 msg = f"**Xếp hạng:** {rating}\n\n**Khuyến nghị:** {decision}"
                 if level == "success":
@@ -849,11 +857,15 @@ elif menu.startswith("3."):
                     st.error(msg)
 
 # -----------------------------------------------------------------------
-# 4) PUBLIC LEDGER (ONLY OVERVIEW + INTEGRITY BUTTON)
+# -----------------------------------------------------------------------
+# 4) PUBLIC LEDGER (AN TOÀN)
+# - Chỉ hiển thị tổng quan block
+# - Có nút kiểm tra toàn vẹn: chỉ PASS/FAIL (không lộ chi tiết)
 # -----------------------------------------------------------------------
 elif menu.startswith("4."):
     st.subheader("📜 Sổ cái (Public Ledger)")
 
+    # 1) Bảng tổng quan block
     df = build_public_ledger_df(bc)
     if df.empty:
         st.info("Chưa có dữ liệu sổ cái.")
@@ -861,17 +873,23 @@ elif menu.startswith("4."):
         st.dataframe(df, use_container_width=True, hide_index=True)
 
     st.markdown("---")
-    st.markdown("### ✅ Kiểm tra toàn vẹn chuỗi (Hash + Chữ ký)")
 
-    if st.button("🔎 KIỂM TRA TOÀN VẸN", use_container_width=True):
-        ok, issues = verify_chain_integrity(bc)
-        if ok:
-            st.success("✅ Chuỗi hợp lệ: previous_hash đúng, hash đúng, chữ ký TX đều hợp lệ.")
-        else:
-            st.error("❌ Phát hiện lỗi toàn vẹn!")
-            for x in issues[:30]:
-                st.write("- " + x)
-            if len(issues) > 30:
-                st.caption(f"(Còn {len(issues)-30} lỗi khác…)")
+    # 2) Nút kiểm tra toàn vẹn (public): chỉ trả PASS/FAIL
+    # Giả sử bạn đã có hàm verify_chain_integrity() trả về:
+    #   ok: bool, messages: list[str]
+    # Nếu chưa có, bạn đổi tên hàm cho khớp code của bạn.
+    if st.button("✅ KIỂM TRA TÍNH TOÀN VẸN", use_container_width=True):
+        try:
+            ok, messages = verify_chain_integrity(bc)  # <-- hàm bạn đang dùng
 
-  
+            if ok:
+                st.success("PASS ✅ Chuỗi dữ liệu hợp lệ (hash + chữ ký hợp lệ).")
+            else:
+                # Public mode: KHÔNG hiển thị chi tiết lỗi để tránh lộ metadata
+                st.error("FAIL ⛔ Phát hiện dữ liệu không hợp lệ. Vui lòng liên hệ bộ phận kiểm toán/IT để kiểm tra chi tiết.")
+                # Nếu bạn vẫn muốn dev xem khi chạy local, có thể log ra console:
+                # print("\n".join(messages))
+
+        except Exception:
+            st.error("⛔ Không thể kiểm tra toàn vẹn do lỗi hệ thống. Vui lòng thử lại.")
+

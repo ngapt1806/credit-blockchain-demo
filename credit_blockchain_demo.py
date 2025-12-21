@@ -899,17 +899,24 @@ elif menu.startswith("4."):
     #   ok: bool, messages: list[str]
     # Nếu chưa có, bạn đổi tên hàm cho khớp code của bạn.
     if st.button("✅ KIỂM TRA TÍNH TOÀN VẸN", use_container_width=True):
-        try:
-            ok, messages = verify_chain_integrity(bc)  # <-- hàm bạn đang dùng
+    try:
+        ok, messages = verify_chain_integrity(bc)
 
-            if ok:
-                st.success("PASS ✅ Chuỗi dữ liệu hợp lệ (hash + chữ ký hợp lệ).")
+        if ok:
+            st.success("PASS ✅ Chuỗi dữ liệu hợp lệ (hash + chữ ký hợp lệ).")
+        else:
+            is_sig = any(("chữ ký" in m.lower()) or ("signature" in m.lower()) for m in messages)
+            is_hash = any(("hash" in m.lower()) or ("previous" in m.lower()) for m in messages)
+
+            # Public mode: chỉ tóm tắt loại lỗi
+            if is_sig and not is_hash:
+                st.error("FAIL ⛔ Lỗi xác thực chữ ký số (signature). Vui lòng liên hệ kiểm toán/IT.")
+            elif is_hash:
+                st.error("FAIL ⛔ Lỗi liên kết/giá trị băm (hash/previous_hash). Vui lòng liên hệ kiểm toán/IT.")
             else:
-                # Public mode: KHÔNG hiển thị chi tiết lỗi để tránh lộ metadata
-                st.error("FAIL ⛔ Phát hiện dữ liệu không hợp lệ. Vui lòng liên hệ bộ phận kiểm toán/IT để kiểm tra chi tiết.")
-                # Nếu bạn vẫn muốn dev xem khi chạy local, có thể log ra console:
-                # print("\n".join(messages))
+                st.error("FAIL ⛔ Phát hiện dữ liệu không hợp lệ. Vui lòng liên hệ kiểm toán/IT.")
+    except Exception:
+        st.error("⛔ Không thể kiểm tra toàn vẹn do lỗi hệ thống. Vui lòng thử lại.")
 
-        except Exception:
-            st.error("⛔ Không thể kiểm tra toàn vẹn do lỗi hệ thống. Vui lòng thử lại.")
+        
 

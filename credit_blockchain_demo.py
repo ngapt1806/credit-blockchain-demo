@@ -757,7 +757,6 @@ elif menu.startswith("2."):
                 "Số tiền (VND)": int(tx.get("amount", 0)),
                 "TX Hash": _short_hash(tx.get("tx_hash", ""), 10, 6),
                 "Request ID": tx.get("request_id", ""),
-                "Sig✓": "OK" if verify_tx(tx) else "FAIL",
             }
         )
     st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
@@ -834,7 +833,6 @@ elif menu.startswith("3."):
                             "Sự kiện": tx.get("status_label", ""),
                             "TX Hash": _short_hash(txh, 10, 6),
                             "Request ID": tx.get("request_id", ""),
-                            "Sig✓": "OK" if verify_tx(tx) else "FAIL",
                         }
                     )
                 st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
@@ -876,11 +874,4 @@ elif menu.startswith("4."):
             if len(issues) > 30:
                 st.caption(f"(Còn {len(issues)-30} lỗi khác…)")
 
-    with st.expander("🔑 Public Key (demo)"):
-        st.code(f"n = {RSA_PUB['n']}\ne = {RSA_PUB['e']}")
-
-    with st.expander("📂 Xem file chain.json (raw)"):
-        if CHAIN_FILE.exists():
-            st.code(CHAIN_FILE.read_text(encoding="utf-8"))
-        else:
-            st.write("Chưa có dữ liệu, file chain.json chưa được tạo.")
+  

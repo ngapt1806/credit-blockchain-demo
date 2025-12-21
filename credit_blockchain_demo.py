@@ -387,41 +387,41 @@ class CreditSharingContractSim:
         self.bc.mine_pending()
 
     def record_transaction_bank_a(self, customer_id: str, amount: int, repayment_status: int, status_label: str):
-    txh = generate_tx_hash()
+          txh = generate_tx_hash()
 
-    # ✅ OFF-CHAIN: lưu chi tiết (nhạy cảm)
-    detail = {
-        "customer_id": str(customer_id),
-        "amount": int(amount),
-        "currency": "VND",
-        "created_at": int(time.time()),
-    }
+           # ✅ OFF-CHAIN: lưu chi tiết (nhạy cảm)
+           detail = {
+                 "customer_id": str(customer_id),
+                 "amount": int(amount),
+                 "currency": "VND",
+                 "created_at": int(time.time()),
+            }
 
-    db = offchain_load()
-    db[txh] = detail
-    offchain_save(db)
+            db = offchain_load()
+            db[txh] = detail
+            offchain_save(db)
 
-    # ✅ ON-CHAIN: chỉ lưu metadata + hash để kiểm chứng
-    tx = {
-        "type": "TRANSACTION",
-        "bank": self.BANK_A,
-        "customer_id": str(customer_id),
+           # ✅ ON-CHAIN: chỉ lưu metadata + hash để kiểm chứng
+           tx = {
+               "type": "TRANSACTION",
+               "bank": self.BANK_A,
+               "customer_id": str(customer_id),
 
-        "repayment_status": int(repayment_status),
-        "status_label": str(status_label),
+               "repayment_status": int(repayment_status),
+               "status_label": str(status_label),
 
-        "tx_hash": txh,
-        "offchain_ref": txh,
-        "offchain_hash": hashlib.sha256(
-            json.dumps(detail, sort_keys=True, ensure_ascii=False).encode("utf-8")
-        ).hexdigest(),
+               "tx_hash": txh,
+               "offchain_ref": txh,
+               "offchain_hash": hashlib.sha256(
+               json.dumps(detail, sort_keys=True, ensure_ascii=False).encode("utf-8")
+              ).hexdigest(),
 
-        "time": int(time.time()),
-    }
+              "time": int(time.time()),
+            }
 
-    self.bc.add_transaction(tx)
-    new_block = self.bc.mine_pending()
-    return tx, new_block
+            self.bc.add_transaction(tx)
+            new_block = self.bc.mine_pending()
+            return tx, new_block
 
 
     # ✅ Ngân hàng B: truy vấn + tính điểm + đánh giá

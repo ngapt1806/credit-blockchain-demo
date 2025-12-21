@@ -23,6 +23,8 @@ import plotly.express as px
 st.set_page_config(page_title="Hệ thống chia sẻ dữ liệu tín dụng", layout="wide")
 BASE_DIR = Path(__file__).resolve().parent
 CHAIN_FILE = BASE_DIR / "chain.json"
+OFFCHAIN_FILE = BASE_DIR / "offchain_db.json"
+
 
 # -----------------------------------------------------------------------
 # TIMEZONE (VN)
@@ -45,6 +47,16 @@ def format_time(ts: int):
         return datetime.datetime.fromtimestamp(ts, tz=VN_TZ).strftime("%d/%m/%Y %H:%M:%S")
     except Exception:
         return "-"
+def offchain_load(path=OFFCHAIN_FILE) -> dict:
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+def offchain_save(db: dict, path=OFFCHAIN_FILE):
+    path.write_text(json.dumps(db, ensure_ascii=False, indent=2), encoding="utf-8")
 
 def credit_decision(score: int):
     if score >= 750:
@@ -375,19 +387,42 @@ class CreditSharingContractSim:
         self.bc.mine_pending()
 
     def record_transaction_bank_a(self, customer_id: str, amount: int, repayment_status: int, status_label: str):
-        tx = {
-            "type": "TRANSACTION",
-            "bank": self.BANK_A,
-            "customer_id": str(customer_id),
-            "amount": int(amount),
-            "repayment_status": int(repayment_status),
-            "status_label": str(status_label),
-            "tx_hash": generate_tx_hash(),
-            "time": int(time.time()),
-        }
-        self.bc.add_transaction(tx)
-        new_block = self.bc.mine_pending()
-        return tx, new_block
+    txh = generate_tx_hash()
+
+    # ✅ OFF-CHAIN: lưu chi tiết (nhạy cảm)
+    detail = {
+        "customer_id": str(customer_id),
+        "amount": int(amount),
+        "currency": "VND",
+        "created_at": int(time.time()),
+    }
+
+    db = offchain_load()
+    db[txh] = detail
+    offchain_save(db)
+
+    # ✅ ON-CHAIN: chỉ lưu metadata + hash để kiểm chứng
+    tx = {
+        "type": "TRANSACTION",
+        "bank": self.BANK_A,
+        "customer_id": str(customer_id),
+
+        "repayment_status": int(repayment_status),
+        "status_label": str(status_label),
+
+        "tx_hash": txh,
+        "offchain_ref": txh,
+        "offchain_hash": hashlib.sha256(
+            json.dumps(detail, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest(),
+
+        "time": int(time.time()),
+    }
+
+    self.bc.add_transaction(tx)
+    new_block = self.bc.mine_pending()
+    return tx, new_block
+
 
     # ✅ Ngân hàng B: truy vấn + tính điểm + đánh giá
     def bank_b_query_and_score(self, customer_id: str):
@@ -588,21 +623,24 @@ elif menu.startswith("2."):
                 st.rerun()
 
     # -------------------------------------------------------------------
-    # 📄 Lịch sử giao dịch (KH luôn thấy dù có/không có request)
-    # -------------------------------------------------------------------
     st.markdown("### 📄 Lịch sử giao dịch")
     tx_rows = bc.customer_transactions(cid)
+
+    db = offchain_load()   # ✅ đọc off-chain 1 lần
     view = []
     for _, tx in tx_rows:
-        view.append(
-            {
+           ref = tx.get("offchain_ref") or tx.get("tx_hash")
+           amount = db.get(ref, {}).get("amount", 0)
+
+           view.append({
                 "Thời gian": format_time(tx.get("time", 0)),
                 "Sự kiện": tx.get("status_label", ""),
-                "Số tiền (VND)": int(tx.get("amount", 0)),
+                "Số tiền (VND)": int(amount),     # ✅ lấy từ off-chain
                 "TX Hash": tx.get("tx_hash", ""),
-            }
-        )
+           })
+
     st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
+
 
     # -------------------------------------------------------------------
     # 🕵️ Lịch sử người xem (Access Logs)

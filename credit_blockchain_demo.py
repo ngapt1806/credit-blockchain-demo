@@ -805,10 +805,10 @@ elif menu.startswith("4."):
     if df.empty:
         st.info("Chưa có dữ liệu sổ cái.")
     else:
-        st.dataframe(df, use_container_width=True, hide_index=True)
- st.subheader("🗄️ Off-chain DB (Admin)")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.subheader("🗄️ Off-chain DB (Admin)")
 
-      db = offchain_load()
-      st.write(f"Số bản ghi off-chain: {len(db)}")
-      st.json(db)   # hiện toàn bộ off-chain_db.json
+    db = offchain_load()
+    st.write(f"Số bản ghi off-chain: {len(db)}")
+    st.json(db)   # hiện toàn bộ off-chain_db.json
 

@@ -760,7 +760,27 @@ elif menu.startswith("2."):
             }
         )
     st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
+    # -------------------------------------------------------------------
+    # 🕵️ Lịch sử người xem (Access Logs)
+    # -------------------------------------------------------------------
+    st.markdown("### 🕵️ Lịch sử người xem")
+    logs = bc.access_logs(cid)
 
+    if not logs:
+        st.info("Chưa có lượt truy cập nào.")
+    else:
+        rows = []
+        for _, tx in logs:
+            rows.append(
+                {
+                    "Type": tx.get("type", ""),              # ACCESS_LOG
+                    "Viewer": tx.get("viewer", ""),          # Ngân hàng B
+                    "Time": format_time(tx.get("time", 0)),  # giờ VN
+                }
+            )
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+ 
 # -----------------------------------------------------------------------
 # 3) NGÂN HÀNG B
 # -----------------------------------------------------------------------

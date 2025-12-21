@@ -915,7 +915,7 @@ elif menu.startswith("4."):
                 st.error("FAIL ⛔ Lỗi liên kết/giá trị băm (hash/previous_hash). Vui lòng liên hệ kiểm toán/IT.")
             else:
                 st.error("FAIL ⛔ Phát hiện dữ liệu không hợp lệ. Vui lòng liên hệ kiểm toán/IT.")
-      except Exception:
+     except Exception:
         st.error("⛔ Không thể kiểm tra toàn vẹn do lỗi hệ thống. Vui lòng thử lại.")
 
         

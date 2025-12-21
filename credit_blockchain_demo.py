@@ -735,38 +735,64 @@ elif menu.startswith("2."):
     rating, decision, _level = credit_decision(int(score))
     st.markdown("### 📈 Điểm tín dụng")
     st.metric("Điểm tín dụng", int(score))
-    st.info(f"**Xếp hạng:** {rating}\n\n**Khuyến nghị:** {decision}")
-
-    # Chỉ hiển thị phần yêu cầu nếu có request
+ # ✅ Request từ NH B (chỉ hiện UI khi có request)
     req = bc.latest_access_request(cid, CreditSharingContractSim.BANK_B)
+
     if req:
-        st.markdown("### 📨 Yêu cầu truy cập")
+        st.markdown("### 📨 Yêu cầu truy cập từ Ngân hàng B")
+
         if req.get("pending"):
-            st.warning(f"**PENDING** | {format_time(req.get('time', 0))} | Mục đích: {req.get('purpose', '-')}")
+            st.warning(
+                f"**PENDING** | {format_time(req.get('time', 0))} | Mục đích: {req.get('purpose', '-')}"
+            )
             c1, c2, c3 = st.columns(3)
             with c1:
                 if st.button("✅ CẤP QUYỀN", use_container_width=True):
                     contract.grant_consent_to_bank_b(cid)
                     bc.save()
-                    st.toast("🔐 Đã cấp quyền", icon="✅")
+                    st.toast("🔐 Đã cấp quyền cho Ngân hàng B", icon="✅")
                     st.rerun()
             with c2:
                 if st.button("❌ TỪ CHỐI", use_container_width=True):
                     contract.deny_consent_to_bank_b(cid)
                     bc.save()
-                    st.toast("🚫 Đã từ chối", icon="⛔")
+                    st.toast("🚫 Đã từ chối yêu cầu", icon="⛔")
                     st.rerun()
             with c3:
                 if st.button("🧹 THU HỒI (REVOKE)", use_container_width=True):
                     contract.revoke_consent_from_bank_b(cid)
                     bc.save()
-                    st.toast("🔒 Đã thu hồi", icon="⛔")
+                    st.toast("🔒 Đã thu hồi quyền", icon="⛔")
                     st.rerun()
         else:
             action = req.get("handled_action") or "-"
             ht = req.get("handled_time")
-            st.info(f"Đã xử lý yêu cầu | Kết quả: **{action}** | Lúc: {format_time(ht) if ht else '-'}")
+            st.info(
+                f"Đã xử lý yêu cầu | Kết quả: **{action}** | Lúc: {format_time(ht) if ht else '-'}"
+            )
 
+            if st.button("🧹 THU HỒI QUYỀN (REVOKE)"):
+                contract.revoke_consent_from_bank_b(cid)
+                bc.save()
+                st.toast("🔒 Đã thu hồi quyền", icon="⛔")
+                st.rerun()
+
+    # -------------------------------------------------------------------
+    # 📄 Lịch sử giao dịch (KH luôn thấy dù có/không có request)
+    # -------------------------------------------------------------------
+    st.markdown("### 📄 Lịch sử giao dịch")
+    tx_rows = bc.customer_transactions(cid)
+    view = []
+    for _, tx in tx_rows:
+        view.append(
+            {
+                "Thời gian": format_time(tx.get("time", 0)),
+                "Sự kiện": tx.get("status_label", ""),
+                "Số tiền (VND)": int(tx.get("amount", 0)),
+                "TX Hash": tx.get("tx_hash", ""),
+            }
+        )
+    st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
     # Lịch sử người xem (ACCESS LOG) - theo yêu cầu bạn
     st.markdown("### 🕵️ Lịch sử người xem")
     logs = bc.access_logs(cid)

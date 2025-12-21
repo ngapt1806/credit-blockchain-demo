@@ -1,14 +1,16 @@
 # =======================================================================
 # credit_blockchain_demo.py
 # HỆ THỐNG CHIA SẺ DỮ LIỆU TÍN DỤNG (Blockchain Chain + Streamlit)
-# Ngân hàng A ghi sự kiện tín dụng | Ngân hàng B gửi yêu cầu & thẩm định | KH cấp/từ chối/thu hồi
-# + SỔ CÁI CÔNG KHAI (Public Ledger)
+# Vai trò:
+#   1) Ngân hàng A: ghi sự kiện tín dụng
+#   2) Khách hàng: xem điểm + khuyến nghị, xử lý yêu cầu, xem lịch sử người xem
+#   3) Ngân hàng B: gửi yêu cầu + thẩm định (KHÔNG hiển thị số tiền)
+#   4) Sổ cái (Public Ledger): chỉ tổng quan block + nút kiểm tra toàn vẹn (PASS/FAIL)
 #
-# YÊU CẦU MỚI:
+# YÊU CẦU:
 # - Mỗi giao dịch có request_id
-# - Có chữ ký số (giả lập RSA)
-# - Có hàm kiểm tra tính toàn vẹn chuỗi (hash + chữ ký)
-# - Giao diện Sổ cái: chỉ tổng quan block + nút kiểm tra toàn vẹn
+# - Có chữ ký số (giả lập RSA) + lưu trong chain.json (KHÔNG hiển thị trên UI)
+# - Có hàm kiểm tra toàn vẹn chuỗi (previous_hash + block hash + chữ ký)
 # =======================================================================
 
 import time
@@ -21,7 +23,6 @@ from zoneinfo import ZoneInfo
 
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 
 # -----------------------------------------------------------------------
 # CONFIG
@@ -29,10 +30,8 @@ import plotly.express as px
 st.set_page_config(page_title="Hệ thống chia sẻ dữ liệu tín dụng", layout="wide")
 BASE_DIR = Path(__file__).resolve().parent
 CHAIN_FILE = BASE_DIR / "chain.json"
+RSA_KEY_FILE = BASE_DIR / "rsa_keys.json"
 
-# -----------------------------------------------------------------------
-# TIMEZONE (VN)
-# -----------------------------------------------------------------------
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 # -----------------------------------------------------------------------
@@ -45,11 +44,9 @@ def generate_tx_hash():
     return "0x" + f"{random.getrandbits(128):032x}"
 
 def generate_request_id():
-    # request_id dùng chung cho tất cả loại giao dịch (TRANSACTION/REQUEST/CONSENT/LOG)
     return "REQ-" + f"{random.getrandbits(64):016x}"
 
 def format_time(ts: int):
-    """Hiển thị đúng giờ Việt Nam (UTC+7)."""
     try:
         ts = int(ts)
         return datetime.datetime.fromtimestamp(ts, tz=VN_TZ).strftime("%d/%m/%Y %H:%M:%S")
@@ -66,10 +63,18 @@ def credit_decision(score: int):
     else:
         return "🔴 Rủi ro cao", "TỪ CHỐI VAY", "error"
 
+def _short_hash(s: str, head=10, tail=6) -> str:
+    if not isinstance(s, str):
+        s = str(s)
+    if len(s) <= head + tail + 1:
+        return s
+    return s[:head] + "…" + s[-tail:]
+
 # -----------------------------------------------------------------------
-# FAKE RSA SIGNATURE (SIMULATION) - KHÔNG DÙNG THƯ VIỆN NGOÀI
-# - Tạo keypair RSA nhỏ (demo), ký bằng modular exponent
-# - Dùng SHA-256(payload) -> int -> ký
+# FAKE RSA SIGNATURE (SIMULATION) - không dùng thư viện ngoài
+# IMPORTANT FIX:
+# - m phải lấy mod n khi sign/verify (nếu không sẽ verify fail)
+# - key phải "cố định" (persist ra file) để không fail khi app restart
 # -----------------------------------------------------------------------
 def _is_probable_prime(n: int, k: int = 8) -> bool:
     if n < 2:
@@ -98,7 +103,6 @@ def _is_probable_prime(n: int, k: int = 8) -> bool:
                 return True
         return False
 
-    # random bases
     for _ in range(k):
         a = random.randrange(2, n - 2)
         if not _try(a):
@@ -124,7 +128,6 @@ def _modinv(a: int, m: int) -> int:
     return x % m
 
 def rsa_generate_keypair(bits: int = 128):
-    # demo: bits nhỏ cho chạy nhanh
     p = _gen_prime(bits)
     q = _gen_prime(bits)
     while q == p:
@@ -135,47 +138,64 @@ def rsa_generate_keypair(bits: int = 128):
     if phi % e == 0:
         e = 3
     d = _modinv(e, phi)
-    return {"n": n, "e": e, "d": d}
+    return {"n": int(n), "e": int(e), "d": int(d)}
 
 def _payload_to_int(payload: dict) -> int:
     s = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     h = hashlib.sha256(s).hexdigest()
     return int(h, 16)
 
+def load_or_create_rsa_keys(path: Path, bits: int = 128) -> dict:
+    if path.exists():
+        try:
+            d = json.loads(path.read_text(encoding="utf-8"))
+            # ép kiểu int cho chắc
+            return {"n": int(d["n"]), "e": int(d["e"]), "d": int(d["d"])}
+        except Exception:
+            pass
+    kp = rsa_generate_keypair(bits=bits)
+    path.write_text(json.dumps(kp, ensure_ascii=False, indent=2), encoding="utf-8")
+    return kp
+
+RSA_KEYS = load_or_create_rsa_keys(RSA_KEY_FILE, bits=128)
+RSA_PUB = {"n": RSA_KEYS["n"], "e": RSA_KEYS["e"]}
+
+SIGN_FIELDS_EXCLUDE = {"signature"}  # không tự ký vào chữ ký
+
+def tx_payload_for_sign(tx: dict) -> dict:
+    return {k: tx[k] for k in sorted(tx.keys()) if k not in SIGN_FIELDS_EXCLUDE}
+
 def rsa_sign(payload: dict, priv: dict) -> str:
-    m = _payload_to_int(payload)
-    sig = pow(m, int(priv["d"]), int(priv["n"]))
+    n = int(priv["n"])
+    m = _payload_to_int(payload) % n
+    sig = pow(m, int(priv["d"]), n)
     return hex(sig)
 
 def rsa_verify(payload: dict, signature_hex: str, pub: dict) -> bool:
     try:
-        m = _payload_to_int(payload)
-        sig = int(signature_hex, 16)
-        check = pow(sig, int(pub["e"]), int(pub["n"]))
+        n = int(pub["n"])
+        m = _payload_to_int(payload) % n
+        sig = int(str(signature_hex), 16)
+        check = pow(sig, int(pub["e"]), n)
         return check == m
     except Exception:
         return False
 
-# tạo “keypair hệ thống” cố định cho demo trong session
-if "rsa_keys" not in st.session_state:
-    kp = rsa_generate_keypair(bits=128)
-    st.session_state.rsa_keys = {"n": kp["n"], "e": kp["e"], "d": kp["d"]}
+def sign_tx_inplace(tx: dict):
+    payload = tx_payload_for_sign(tx)
+    tx["signature"] = rsa_sign(payload, RSA_KEYS)
 
-RSA_KEYS = st.session_state.rsa_keys
-RSA_PUB = {"n": RSA_KEYS["n"], "e": RSA_KEYS["e"]}  # public key
+def verify_tx(tx: dict) -> bool:
+    sig = tx.get("signature")
+    if not sig:
+        return False
+    payload = tx_payload_for_sign(tx)
+    return rsa_verify(payload, sig, RSA_PUB)
 
 # -----------------------------------------------------------------------
 # PUBLIC LEDGER HELPERS
 # -----------------------------------------------------------------------
-def _short_hash(s: str, head=10, tail=8) -> str:
-    if not isinstance(s, str):
-        s = str(s)
-    if len(s) <= head + tail + 1:
-        return s
-    return s[:head] + "…" + s[-tail:]
-
 def summarize_tx_public(tx: dict) -> str:
-    """Tóm tắt giao dịch theo kiểu public (không lộ dữ liệu nhạy cảm)."""
     t = str(tx.get("type", "")).upper()
     if t == "SYSTEM":
         return "SYSTEM INIT"
@@ -184,11 +204,10 @@ def summarize_tx_public(tx: dict) -> str:
     if t == "ACCESS_REQUEST":
         return "REQUEST: Yêu cầu truy cập"
     if t == "CONSENT":
-        act = str(tx.get("action", "")).upper()
-        return f"CONSENT: {act}"
+        return f"CONSENT: {str(tx.get('action','')).upper()}"
     if t == "ACCESS_LOG":
         return "ACCESS LOG: Hồ sơ được truy cập"
-    return f"{t}"
+    return t
 
 def build_public_ledger_df(bc) -> pd.DataFrame:
     rows = []
@@ -202,32 +221,12 @@ def build_public_ledger_df(bc) -> pd.DataFrame:
             content = f"{len(txs)} giao dịch (vd: {summarize_tx_public(txs[0])})"
 
         rows.append({
-            "Block Index": b.index,
-            "Thời gian": format_time(b.timestamp),
+            "Block Index": int(b.index),
+            "Thời gian": format_time(int(b.timestamp)),
             "Nội dung giao dịch": content,
             "Hash ID": _short_hash(b.hash, 10, 8),
         })
     return pd.DataFrame(rows)
-
-# -----------------------------------------------------------------------
-# TRANSACTION SIGNING HELPERS
-# -----------------------------------------------------------------------
-SIGN_FIELDS_EXCLUDE = {"signature"}  # chữ ký không được tự ký vào chính nó
-
-def tx_payload_for_sign(tx: dict) -> dict:
-    # payload chuẩn để ký/verify (loại bỏ signature)
-    return {k: tx[k] for k in sorted(tx.keys()) if k not in SIGN_FIELDS_EXCLUDE}
-
-def sign_tx_inplace(tx: dict):
-    payload = tx_payload_for_sign(tx)
-    tx["signature"] = rsa_sign(payload, RSA_KEYS)
-
-def verify_tx(tx: dict) -> bool:
-    sig = tx.get("signature")
-    if not sig:
-        return False
-    payload = tx_payload_for_sign(tx)
-    return rsa_verify(payload, str(sig), RSA_PUB)
 
 # -----------------------------------------------------------------------
 # BLOCKCHAIN CORE
@@ -298,7 +297,7 @@ class Blockchain:
         tx = dict(tx)
         tx.setdefault("time", int(time.time()))
         tx.setdefault("request_id", generate_request_id())
-        # ký số transaction
+        # ký tx
         sign_tx_inplace(tx)
         self.pending.append(tx)
 
@@ -328,7 +327,7 @@ class Blockchain:
     def rebuild_access_rights(self):
         self.access_rights = {}
         for b in self.chain:
-            for tx in b.transactions:
+            for tx in (b.transactions or []):
                 if tx.get("type") == "CONSENT":
                     key = f"{tx.get('customer_id')}_{tx.get('target_bank')}"
                     action = str(tx.get("action", "")).upper()
@@ -357,7 +356,7 @@ class Blockchain:
     # Helpers
     def iter_txs(self):
         for b in self.chain:
-            for tx in b.transactions:
+            for tx in (b.transactions or []):
                 yield (b, tx)
 
     def list_customers(self):
@@ -385,7 +384,6 @@ class Blockchain:
         return rows
 
     def latest_access_request(self, customer_id: str, requester_bank: str):
-        """Request mới nhất + pending nếu sau request chưa có CONSENT."""
         latest_req = None
         for _, tx in self.iter_txs():
             if (
@@ -422,6 +420,7 @@ class Blockchain:
         latest_req["handled_time"] = handled_time
         return latest_req
 
+    # trạng thái khoản vay (0 mở / 1-2 đóng)
     def customer_loan_state(self, customer_id: str):
         txs = self.customer_transactions(customer_id)
         has_open = False
@@ -437,9 +436,9 @@ class Blockchain:
 
 # -----------------------------------------------------------------------
 # CHAIN INTEGRITY CHECK
-# - check previous_hash linking
-# - check block hash recalculation
-# - check tx signature verify
+# - previous_hash linking
+# - block hash recalculation
+# - tx signature verify
 # -----------------------------------------------------------------------
 def verify_chain_integrity(bc: Blockchain):
     issues = []
@@ -455,13 +454,13 @@ def verify_chain_integrity(bc: Blockchain):
             prev = bc.chain[i - 1]
             if b.previous_hash != prev.hash:
                 ok = False
-                issues.append(f"Block {b.index} previous_hash không khớp (expected {prev.hash}, got {b.previous_hash})")
+                issues.append(f"Block {b.index} previous_hash không khớp")
 
         # 2) block hash verify
         recalculated = b.calculate_hash()
         if b.hash != recalculated:
             ok = False
-            issues.append(f"Block {b.index} hash không khớp (stored {b.hash}, recalculated {recalculated})")
+            issues.append(f"Block {b.index} hash không khớp")
 
         # 3) tx signature verify
         for j, tx in enumerate(b.transactions or []):
@@ -469,18 +468,18 @@ def verify_chain_integrity(bc: Blockchain):
                 ok = False
                 rid = tx.get("request_id", "N/A")
                 t = tx.get("type", "N/A")
-                issues.append(f"Chữ ký TX sai: Block {b.index}, tx#{j}, type={t}, request_id={rid}")
+                issues.append(f"Signature fail: Block {b.index}, tx#{j}, type={t}, request_id={rid}")
 
     return ok, issues
 
 # -----------------------------------------------------------------------
-# SCORING
+# SCORING (on-chain)
 # -----------------------------------------------------------------------
 def calculate_onchain_score_from_chain(bc: Blockchain, customer_id: str):
     base = 650
     txs = bc.customer_transactions(customer_id)
     if not txs:
-        return base, {"Đúng hạn": 0, "Trễ hạn": 0, "Đang vay": 0}
+        return base
 
     ontime = late = 0
     for _, tx in txs:
@@ -495,10 +494,10 @@ def calculate_onchain_score_from_chain(bc: Blockchain, customer_id: str):
 
     score = base + ontime * 50 - late * 50 + open_flag * 10
     score = max(300, min(850, score))
-    return score, {"Đúng hạn": ontime, "Trễ hạn": late, "Đang vay": open_flag}
+    return int(score)
 
 # -----------------------------------------------------------------------
-# SMART CONTRACT MÔ PHỎNG (Python)
+# SMART CONTRACT SIMULATION
 # -----------------------------------------------------------------------
 class CreditSharingContractSim:
     BANK_B = "Ngân hàng B"
@@ -514,29 +513,52 @@ class CreditSharingContractSim:
             "requester_bank": self.BANK_B,
             "purpose": str(purpose),
             "tx_hash": generate_tx_hash(),
-            # request_id tự thêm + ký trong add_transaction()
         }
         self.bc.add_transaction(tx)
         self.bc.mine_pending()
         return tx
 
     def grant_consent_to_bank_b(self, customer_id: str):
-        self.bc.add_transaction({"type": "CONSENT", "customer_id": str(customer_id), "target_bank": self.BANK_B, "action": "GRANT"})
+        self.bc.add_transaction({
+            "type": "CONSENT",
+            "customer_id": str(customer_id),
+            "target_bank": self.BANK_B,
+            "action": "GRANT",
+            "tx_hash": generate_tx_hash(),
+        })
         self.bc.mine_pending()
 
     def deny_consent_to_bank_b(self, customer_id: str):
-        self.bc.add_transaction({"type": "CONSENT", "customer_id": str(customer_id), "target_bank": self.BANK_B, "action": "DENY"})
+        self.bc.add_transaction({
+            "type": "CONSENT",
+            "customer_id": str(customer_id),
+            "target_bank": self.BANK_B,
+            "action": "DENY",
+            "tx_hash": generate_tx_hash(),
+        })
         self.bc.mine_pending()
 
     def revoke_consent_from_bank_b(self, customer_id: str):
-        self.bc.add_transaction({"type": "CONSENT", "customer_id": str(customer_id), "target_bank": self.BANK_B, "action": "REVOKE"})
+        self.bc.add_transaction({
+            "type": "CONSENT",
+            "customer_id": str(customer_id),
+            "target_bank": self.BANK_B,
+            "action": "REVOKE",
+            "tx_hash": generate_tx_hash(),
+        })
         self.bc.mine_pending()
 
     def is_allowed(self, customer_id: str, bank_name: str) -> bool:
         return self.bc.check_permission(str(customer_id), str(bank_name))
 
     def log_access(self, customer_id: str, viewer_bank: str):
-        self.bc.add_transaction({"type": "ACCESS_LOG", "customer_id": str(customer_id), "viewer": str(viewer_bank), "msg": "Viewed Profile"})
+        self.bc.add_transaction({
+            "type": "ACCESS_LOG",
+            "customer_id": str(customer_id),
+            "viewer": str(viewer_bank),
+            "msg": "Viewed Profile",
+            "tx_hash": generate_tx_hash(),
+        })
         self.bc.mine_pending()
 
     def record_transaction_bank_a(self, customer_id: str, amount: int, repayment_status: int, status_label: str):
@@ -544,11 +566,10 @@ class CreditSharingContractSim:
             "type": "TRANSACTION",
             "bank": self.BANK_A,
             "customer_id": str(customer_id),
-            "amount": int(amount),
+            "amount": int(amount),  # lưu trong chain.json, nhưng UI có thể ẩn tùy màn
             "repayment_status": int(repayment_status),
             "status_label": str(status_label),
             "tx_hash": generate_tx_hash(),
-            # request_id tự thêm + ký trong add_transaction()
         }
         self.bc.add_transaction(tx)
         new_block = self.bc.mine_pending()
@@ -559,13 +580,14 @@ class CreditSharingContractSim:
         if not self.is_allowed(cid, self.BANK_B):
             return None
 
+        # log access trước
         self.log_access(cid, self.BANK_B)
 
-        score, detail = calculate_onchain_score_from_chain(self.bc, cid)
+        score = calculate_onchain_score_from_chain(self.bc, cid)
         rating, decision, level = credit_decision(int(score))
+
         return {
             "score": int(score),
-            "detail": detail,
             "rating": rating,
             "decision": decision,
             "level": level,
@@ -599,12 +621,13 @@ with st.sidebar:
         [
             "1. Ngân hàng A - Ghi giao dịch",
             "2. Khách hàng (User App)",
-            "3. Ngân hàng B - Gửi yêu cầu & Tra cứu",
+            "3. Ngân hàng B - Gửi yêu cầu & Thẩm định",
             "4. Sổ cái (Public Ledger)",
         ],
     )
 
     if st.button("🧹 Reset demo", use_container_width=True):
+        # reset chain (giữ RSA key để signature ổn định)
         st.session_state.bc = Blockchain(difficulty=2)
         st.session_state.new_customer_id = generate_customer_id()
         st.session_state.active_customer = None
@@ -620,10 +643,10 @@ bc = st.session_state.bc
 contract = CreditSharingContractSim(bc)
 
 # -----------------------------------------------------------------------
-# 1) NGÂN HÀNG A: GHI SỰ KIỆN TÍN DỤNG
+# 1) NGÂN HÀNG A
 # -----------------------------------------------------------------------
 if menu.startswith("1."):
-    st.subheader("🏦 Ngân hàng A: Ghi nhận sự kiện tín dụng (On-chain)")
+    st.subheader("🏦 Ngân hàng A: Ghi nhận sự kiện tín dụng")
 
     col1, col2 = st.columns(2)
 
@@ -654,7 +677,7 @@ if menu.startswith("1."):
         }
         event = st.selectbox("Loại sự kiện", list(event_map.keys()))
 
-        if st.button("📤 Ghi giao dịch", use_container_width=False):
+        if st.button("📤 Ghi giao dịch"):
             cid = str(customer_id)
             repayment_status, status_label = event_map[event]
 
@@ -662,9 +685,9 @@ if menu.startswith("1."):
             has_open = cur_state["has_open"]
 
             if repayment_status == 0 and has_open:
-                st.warning("Lưu ý: Hệ thống đang coi khách có khoản vay 'đang mở'. Bạn vẫn có thể ghi 'Giải ngân' nếu đây là dữ liệu lịch sử/ngoại lệ.")
+                st.warning("Lưu ý: Khách đang có khoản vay 'đang mở'.")
             if repayment_status in (1, 2) and (not has_open):
-                st.warning("Lưu ý: Chưa thấy 'Giải ngân' trước đó. Bạn vẫn có thể ghi 'Trả đúng/trễ hạn' nếu đang nhập lịch sử.")
+                st.warning("Lưu ý: Chưa thấy 'Giải ngân' trước đó (có thể đang nhập lịch sử).")
 
             tx, new_block = contract.record_transaction_bank_a(
                 customer_id=cid,
@@ -680,15 +703,18 @@ if menu.startswith("1."):
 
             st.success("✅ Ghi nhận thành công")
             if new_block:
-                # tx ở đây là bản gốc trước khi add_transaction() ký + request_id
-                st.info("Giao dịch đã được đóng gói, ký số và ghi vào chuỗi.")
-                st.code(f"TX Hash: {tx.get('tx_hash','-')}\nTime: {format_time(int(time.time()))}")
+                st.code(
+                    "Đã đóng gói + ký số + ghi vào chain\n"
+                    f"TX Hash: {tx.get('tx_hash','-')}\n"
+                    f"Time: {format_time(int(time.time()))}"
+                )
 
 # -----------------------------------------------------------------------
-# 2) KHÁCH HÀNG
+# 2) KHÁCH HÀNG: chỉ điểm + khuyến nghị, không biểu đồ
+# + có lịch sử người xem
 # -----------------------------------------------------------------------
 elif menu.startswith("2."):
-    st.subheader("👤 Khách hàng: Nhận yêu cầu & quản lý quyền chia sẻ")
+    st.subheader("👤 Khách hàng")
 
     customers = bc.list_customers()
     customers = [c for c in customers if len(bc.customer_transactions(c)) > 0]
@@ -702,24 +728,21 @@ elif menu.startswith("2."):
 
     cid = st.selectbox("Chọn khách hàng", customers, index=default_idx)
     st.session_state.active_customer = str(cid)
-
     st.success(f"Khách hàng hiện tại: **{cid}**")
 
-    # ✅ CHỈ HIỂN THỊ ĐIỂM
-    score, _detail = calculate_onchain_score_from_chain(bc, cid)
+    # Điểm + khuyến nghị (không biểu đồ)
+    score = calculate_onchain_score_from_chain(bc, cid)
+    rating, decision, _level = credit_decision(int(score))
     st.markdown("### 📈 Điểm tín dụng")
     st.metric("Điểm tín dụng", int(score))
+    st.info(f"**Xếp hạng:** {rating}\n\n**Khuyến nghị:** {decision}")
 
-    # ✅ Request từ NH B (chỉ hiện UI khi có request)
+    # Chỉ hiển thị phần yêu cầu nếu có request
     req = bc.latest_access_request(cid, CreditSharingContractSim.BANK_B)
-
     if req:
         st.markdown("### 📨 Yêu cầu truy cập")
-
         if req.get("pending"):
-            st.warning(
-                f"**PENDING** | {format_time(req.get('time', 0))} | Mục đích: {req.get('purpose', '-')}"
-            )
+            st.warning(f"**PENDING** | {format_time(req.get('time', 0))} | Mục đích: {req.get('purpose', '-')}")
             c1, c2, c3 = st.columns(3)
             with c1:
                 if st.button("✅ CẤP QUYỀN", use_container_width=True):
@@ -742,50 +765,28 @@ elif menu.startswith("2."):
         else:
             action = req.get("handled_action") or "-"
             ht = req.get("handled_time")
-            st.info(
-                f"Đã xử lý yêu cầu | Kết quả: **{action}** | Lúc: {format_time(ht) if ht else '-'}"
-            )
+            st.info(f"Đã xử lý yêu cầu | Kết quả: **{action}** | Lúc: {format_time(ht) if ht else '-'}")
 
-    st.markdown("### 📄 Lịch sử giao dịch")
-    tx_rows = bc.customer_transactions(cid)
-    view = []
-    for _, tx in tx_rows:
-        view.append(
-            {
-                "Thời gian": format_time(tx.get("time", 0)),
-                "Sự kiện": tx.get("status_label", ""),
-                "Số tiền (VND)": int(tx.get("amount", 0)),
-                "TX Hash": _short_hash(tx.get("tx_hash", ""), 10, 6),
-                "Request ID": tx.get("request_id", ""),
-            }
-        )
-    st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
-    # -------------------------------------------------------------------
-    # 🕵️ Lịch sử người xem (Access Logs)
-    # -------------------------------------------------------------------
+    # Lịch sử người xem (ACCESS LOG) - theo yêu cầu bạn
     st.markdown("### 🕵️ Lịch sử người xem")
     logs = bc.access_logs(cid)
-
     if not logs:
         st.info("Chưa có lượt truy cập nào.")
     else:
         rows = []
         for _, tx in logs:
-            rows.append(
-                {
-                    "Type": tx.get("type", ""),              # ACCESS_LOG
-                    "Viewer": tx.get("viewer", ""),          # Ngân hàng B
-                    "Time": format_time(tx.get("time", 0)),  # giờ VN
-                }
-            )
+            rows.append({
+                "Thời gian": format_time(tx.get("time", 0)),
+                "Người xem": tx.get("viewer", ""),
+                "Request ID": tx.get("request_id", ""),
+            })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
- 
 # -----------------------------------------------------------------------
-# 3) NGÂN HÀNG B
+# 3) NGÂN HÀNG B: thẩm định KHÔNG hiển thị số tiền
 # -----------------------------------------------------------------------
 elif menu.startswith("3."):
-    st.subheader("🏦 Ngân hàng B: Gửi yêu cầu & tra cứu tín dụng")
+    st.subheader("🏦 Ngân hàng B: Gửi yêu cầu & thẩm định")
 
     customers = bc.list_customers()
     customers = [c for c in customers if len(bc.customer_transactions(c)) > 0]
@@ -793,7 +794,7 @@ elif menu.startswith("3."):
         st.info("Chưa có khách hàng. Hãy sang 'Ngân hàng A' để tạo giao dịch trước.")
         st.stop()
 
-    pick_cid = st.selectbox("Khách hàng cần tra cứu", customers)
+    pick_cid = st.selectbox("Khách hàng cần thẩm định", customers)
     st.session_state.active_customer = str(pick_cid)
 
     req = bc.latest_access_request(pick_cid, CreditSharingContractSim.BANK_B)
@@ -823,13 +824,12 @@ elif menu.startswith("3."):
         st.write("✅ Được cấp quyền" if allowed else "⛔ Chưa được cấp quyền")
 
     with right:
-        st.markdown("### 📊 Kết quả tra cứu")
-        run = st.button("🔍 TRA CỨU ĐIỂM TÍN DỤNG", use_container_width=True)
+        st.markdown("### 📊 Kết quả thẩm định")
 
         if not allowed:
             st.error("⛔ Chưa có quyền truy cập. Hãy gửi yêu cầu và chờ khách hàng cấp quyền.")
         else:
-            if run:
+            if st.button("🔍 TRUY VẤN & TÍNH ĐIỂM", use_container_width=True):
                 result = contract.bank_b_query_and_score(pick_cid)
                 if result is None:
                     st.error("⛔ Không có quyền truy cập.")
@@ -837,37 +837,24 @@ elif menu.startswith("3."):
                 bc.save()
 
                 score = result["score"]
-                detail = result["detail"]
                 rating = result["rating"]
                 decision = result["decision"]
                 level = result["level"]
                 tx_rows = result["tx_rows"]
 
-                st.markdown("#### 📄 Lịch sử tín dụng")
+                st.markdown("#### 📄 Lịch sử tín dụng (ẩn số tiền)")
                 view = []
                 for _, tx in tx_rows:
-                    txh = tx.get("tx_hash", "")
-                    view.append(
-                        {
-                            "Thời gian": format_time(tx.get("time", 0)),
-                            "Sự kiện": tx.get("status_label", ""),
-                            "TX Hash": _short_hash(txh, 10, 6),
-                            "Request ID": tx.get("request_id", ""),
-                        }
-                    )
+                    view.append({
+                        "Thời gian": format_time(tx.get("time", 0)),
+                        "Sự kiện": tx.get("status_label", ""),
+                        "TX Hash": _short_hash(tx.get("tx_hash", ""), 10, 6),
+                        "Request ID": tx.get("request_id", ""),
+                    })
                 st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
 
-                st.markdown("#### 📈 Điểm & đánh giá")
+                st.markdown("#### 📈 Điểm & khuyến nghị")
                 st.metric("Điểm tín dụng", int(score))
-                pie = pd.DataFrame(detail.items(), columns=["Loại", "Số lượng"])
-                fig = px.pie(pie, values="Số lượng", names="Loại", hole=0.45)
-                fig.update_layout(
-                    height=280,
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
                 msg = f"**Xếp hạng:** {rating}\n\n**Khuyến nghị:** {decision}"
                 if level == "success":
                     st.success(msg)
@@ -877,15 +864,11 @@ elif menu.startswith("3."):
                     st.error(msg)
 
 # -----------------------------------------------------------------------
-# -----------------------------------------------------------------------
-# 4) PUBLIC LEDGER (AN TOÀN)
-# - Chỉ hiển thị tổng quan block
-# - Có nút kiểm tra toàn vẹn: chỉ PASS/FAIL (không lộ chi tiết)
+# 4) PUBLIC LEDGER: chỉ bảng tổng quan + nút kiểm tra toàn vẹn
 # -----------------------------------------------------------------------
 elif menu.startswith("4."):
     st.subheader("📜 Sổ cái (Public Ledger)")
 
-    # 1) Bảng tổng quan block
     df = build_public_ledger_df(bc)
     if df.empty:
         st.info("Chưa có dữ liệu sổ cái.")
@@ -894,29 +877,22 @@ elif menu.startswith("4."):
 
     st.markdown("---")
 
-    # 2) Nút kiểm tra toàn vẹn (public): chỉ trả PASS/FAIL
-    # Giả sử bạn đã có hàm verify_chain_integrity() trả về:
-    #   ok: bool, messages: list[str]
-    # Nếu chưa có, bạn đổi tên hàm cho khớp code của bạn.
+    # Nút kiểm tra toàn vẹn: chỉ PASS/FAIL (public-safe)
     if st.button("✅ KIỂM TRA TÍNH TOÀN VẸN", use_container_width=True):
-     try:
-        ok, messages = verify_chain_integrity(bc)
-
-        if ok:
-            st.success("PASS ✅ Chuỗi dữ liệu hợp lệ (hash + chữ ký hợp lệ).")
-        else:
-            is_sig = any(("chữ ký" in m.lower()) or ("signature" in m.lower()) for m in messages)
-            is_hash = any(("hash" in m.lower()) or ("previous" in m.lower()) for m in messages)
-
-            # Public mode: chỉ tóm tắt loại lỗi
-            if is_sig and not is_hash:
-                st.error("FAIL ⛔ Lỗi xác thực chữ ký số (signature). Vui lòng liên hệ kiểm toán/IT.")
-            elif is_hash:
-                st.error("FAIL ⛔ Lỗi liên kết/giá trị băm (hash/previous_hash). Vui lòng liên hệ kiểm toán/IT.")
+        try:
+            ok, messages = verify_chain_integrity(bc)
+            if ok:
+                st.success("PASS ✅ Chuỗi dữ liệu hợp lệ (hash + chữ ký hợp lệ).")
             else:
-                st.error("FAIL ⛔ Phát hiện dữ liệu không hợp lệ. Vui lòng liên hệ kiểm toán/IT.")
-     except Exception:
-        st.error("⛔ Không thể kiểm tra toàn vẹn do lỗi hệ thống. Vui lòng thử lại.")
+                # public-safe: chỉ báo loại lỗi, không show chi tiết
+                is_sig = any(("signature" in m.lower()) for m in messages)
+                is_hash = any(("hash" in m.lower()) or ("previous" in m.lower()) for m in messages)
 
-        
-
+                if is_sig and not is_hash:
+                    st.error("FAIL ⛔ Lỗi xác thực chữ ký số (signature). Vui lòng liên hệ kiểm toán/IT.")
+                elif is_hash:
+                    st.error("FAIL ⛔ Lỗi liên kết/giá trị băm (hash/previous_hash). Vui lòng liên hệ kiểm toán/IT.")
+                else:
+                    st.error("FAIL ⛔ Phát hiện dữ liệu không hợp lệ. Vui lòng liên hệ kiểm toán/IT.")
+        except Exception:
+            st.error("⛔ Không thể kiểm tra toàn vẹn do lỗi hệ thống. Vui lòng thử lại.")

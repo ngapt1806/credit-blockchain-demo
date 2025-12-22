@@ -704,7 +704,6 @@ if menu.startswith("1."):
             st.success("✅ Ghi nhận thành công")
             if new_block:
                 st.code(
-                    "Đã đóng gói + ký số + ghi vào chain\n"
                     f"TX Hash: {tx.get('tx_hash','-')}\n"
                     f"Time: {format_time(int(time.time()))}"
                 )

@@ -611,7 +611,7 @@ contract = CreditSharingContractSim(bc)
 # HEADER
 # -----------------------------------------------------------------------
 st.markdown(
-    "<h1 style='text-align:center;'>🔗 Hệ thống chia sẻ dữ liệu tín dụng (Blockchain Chain)</h1>",
+    "<h1 style='text-align:center;'>🔗 Hệ thống chia sẻ dữ liệu tín dụng (Blockchain)</h1>",
     unsafe_allow_html=True,
 )
 

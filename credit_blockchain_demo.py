@@ -901,6 +901,4 @@ elif menu.startswith("4."):
     else:
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-    st.markdown("---")
-
-   vẹn do lỗi hệ thống. Vui lòng thử lại.")
+ 

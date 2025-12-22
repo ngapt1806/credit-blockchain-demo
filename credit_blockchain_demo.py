@@ -881,6 +881,14 @@ elif menu.startswith("3."):
 
                 st.markdown("#### 📈 Điểm & khuyến nghị")
                 st.metric("Điểm tín dụng", int(score))
+                pie = pd.DataFrame(detail.items(), columns=["Loại", "Số lượng"])
+                fig = px.pie(pie, values="Số lượng", names="Loại", hole=0.45)
+                fig.update_layout(
+                    height=280,
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+                )
+                st.plotly_chart(fig, use_container_width=True)
                 msg = f"**Xếp hạng:** {rating}\n\n**Khuyến nghị:** {decision}"
                 if level == "success":
                     st.success(msg)

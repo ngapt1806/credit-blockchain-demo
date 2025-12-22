@@ -903,22 +903,4 @@ elif menu.startswith("4."):
 
     st.markdown("---")
 
-    # Nút kiểm tra toàn vẹn: chỉ PASS/FAIL (public-safe)
-    if st.button("✅ KIỂM TRA TÍNH TOÀN VẸN", use_container_width=True):
-        try:
-            ok, messages = verify_chain_integrity(bc)
-            if ok:
-                st.success("PASS ✅ Chuỗi dữ liệu hợp lệ (hash + chữ ký hợp lệ).")
-            else:
-                # public-safe: chỉ báo loại lỗi, không show chi tiết
-                is_sig = any(("signature" in m.lower()) for m in messages)
-                is_hash = any(("hash" in m.lower()) or ("previous" in m.lower()) for m in messages)
-
-                if is_sig and not is_hash:
-                    st.error("FAIL ⛔ Lỗi xác thực chữ ký số (signature). Vui lòng liên hệ kiểm toán/IT.")
-                elif is_hash:
-                    st.error("FAIL ⛔ Lỗi liên kết/giá trị băm (hash/previous_hash). Vui lòng liên hệ kiểm toán/IT.")
-                else:
-                    st.error("FAIL ⛔ Phát hiện dữ liệu không hợp lệ. Vui lòng liên hệ kiểm toán/IT.")
-        except Exception:
-            st.error("⛔ Không thể kiểm tra toàn vẹn do lỗi hệ thống. Vui lòng thử lại.")
+   vẹn do lỗi hệ thống. Vui lòng thử lại.")
